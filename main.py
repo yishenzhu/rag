@@ -1,0 +1,33 @@
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from .core import Config, setup_logger
+from .rag import Pipeline
+from .api import router
+from .tool import run_mcp
+
+conf = Config.load()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    pipeline = await Pipeline(conf.rag).attach(app).setup()
+    async with run_mcp(conf.mcp, pipeline):
+        yield
+
+
+def main():
+    setup_logger(conf.log)
+
+    app = FastAPI(
+        title="RAG Service",
+        version="1.0.0",
+        lifespan=lifespan,
+    )
+    app.include_router(router)
+
+    import uvicorn
+
+    uvicorn.run(app, host=conf.app.host, port=conf.app.port)
+
+
+main()
