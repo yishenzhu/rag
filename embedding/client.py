@@ -1,36 +1,38 @@
-import torch
 import numpy as np
-from FlagEmbedding import BGEM3FlagModel
-from ..core import EmbeddingConfig
+import httpx
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingClient:
-    def __init__(self, conf: EmbeddingConfig):
-        self._conf = conf
-        self._device = "cuda" if torch.cuda.is_available() else "cpu"
-        self._model = BGEM3FlagModel(
-            conf.model,
-            devices=self._device,
-            batch_size=conf.batch_size,
-        )
+
+    def __init__(self, base_url: str):
+        self._client = httpx.Client(base_url=base_url.rstrip("/"), timeout=120)
+        self._dims: int | None = None
+        logger.info("EmbeddingClient connected to %s", base_url)
 
     def encode(
         self, texts: list[str], hybrid: bool = False
     ) -> tuple[np.ndarray, list[dict] | None]:
-        output = self._model.encode(texts, return_dense=True, return_sparse=hybrid)
-        sparse_vectors = (
-            [
-                {
-                    "indices": [int(k) for k in lw],
-                    "values": [float(v) for v in lw.values()],
-                }
-                for lw in output["lexical_weights"]
-            ]
-            if hybrid
-            else None
+        rsp = self._client.post(
+            "/embed",
+            json={"texts": texts, "hybrid": hybrid},
         )
-        return output["dense_vecs"], sparse_vectors
+        rsp.raise_for_status()
+        data = rsp.json()
+
+        dense = np.array(data["dense_vecs"], dtype=np.float32)
+        sparse = data.get("sparse_vectors")
+        return dense, sparse
 
     @property
     def dims(self) -> int:
-        return self._model.model.model.config.hidden_size
+        if self._dims is None:
+            rsp = self._client.get("/dims")
+            rsp.raise_for_status()
+            self._dims = rsp.json()["dims"]
+        return self._dims
+
+    def close(self) -> None:
+        self._client.close()

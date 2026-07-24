@@ -9,20 +9,14 @@ from .config import (
 from .logger import setup_logger
 
 from .schemas import (
-    AddReq,
-    AddRsp,
     CollectionInfo,
     CollectionBriefInfo,
     CreateReq,
     CreateRsp,
     DeleteRsp,
-    EmbedReq,
-    EmbedRsp,
     IngestReq,
     IngestRsp,
     ListRsp,
-    SearchReq,
-    SearchRsp,
     SearchResult,
     SearchType,
     Text,

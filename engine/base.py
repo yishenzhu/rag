@@ -155,6 +155,45 @@ class Registry:
             queries, top_k, threshold, search_type, rerank, filters
         )
 
+    async def search_all(
+        self,
+        queries: list[str],
+        top_k: int = 5,
+        threshold: float = 0.1,
+        search_type: SearchType = SearchType.DENSE,
+        rerank: bool = False,
+    ) -> list[SearchResult]:
+        enabled = [c for c in self._collections.values() if c.enabled]
+        if not enabled:
+            return []
+
+        tasks = [
+            c.search(
+                queries,
+                top_k * 2 if rerank else top_k,
+                threshold,
+                search_type,
+                rerank=False,  
+            )
+            for c in enabled
+        ]
+        all_results: list[SearchResult] = []
+        for batch in await asyncio.gather(*tasks):
+            all_results.extend(batch)
+
+        if rerank and all_results and self._rerank:
+            query_text = queries[0]
+            texts = [r.payload.content for r in all_results]
+            scores = self._rerank.rerank(query_text, texts)
+            all_results = [
+                r
+                for _, r in sorted(
+                    zip(scores, all_results), key=lambda x: x[0], reverse=True
+                )
+            ]
+
+        return all_results[:top_k]
+
     async def initialize(self, collections: list):
         for collection in collections:
             name = collection.name

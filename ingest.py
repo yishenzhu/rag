@@ -2,7 +2,7 @@ import argparse
 import sys
 import httpx
 
-from .rag import DocumentLoader
+from .engine import DocumentLoader
 
 
 def main():

@@ -6,7 +6,7 @@ from beir.datasets.data_loader_hf import HFDataLoader
 from beir.retrieval.evaluation import EvaluateRetrieval
 
 from .core import Config, SearchType, Document, auto_path, setup_logger
-from .rag import Pipeline
+from .engine import Pipeline
 
 logger = logging.getLogger(__name__)
 

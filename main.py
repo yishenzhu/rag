@@ -1,18 +1,16 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from .core import Config, setup_logger
-from .rag import Pipeline
-from .api import router
-from .tool import run_mcp
+from .engine import Pipeline
+from .routes import router
 
 conf = Config.load()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    pipeline = await Pipeline(conf.rag).attach(app).setup()
-    async with run_mcp(conf.mcp, pipeline):
-        yield
+    await Pipeline(conf.rag).attach(app).setup()
+    yield
 
 
 def main():

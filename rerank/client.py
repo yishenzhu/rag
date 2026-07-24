@@ -1,39 +1,46 @@
-from sentence_transformers import CrossEncoder
-import torch
+import httpx
 import time
 import logging
-from ..core import RerankConfig, Config
 
 logger = logging.getLogger(__name__)
 
 
 class RerankClient:
-    def __init__(self, conf: RerankConfig):
-        self._batch_size = conf.batch_size
-        self._model = CrossEncoder(
-            conf.model,
-            device="cuda" if torch.cuda.is_available() else "cpu",
-            max_length=512,
-            model_kwargs={"torch_dtype": torch.float16},
-        )
+    """Rerank 客户端 —— 通过 HTTP 调用模型推理服务"""
+
+    def __init__(self, base_url: str):
+        self._client = httpx.Client(base_url=base_url.rstrip("/"), timeout=120)
+        logger.info("RerankClient connected to %s", base_url)
 
     def rerank(self, query: str, texts: list[str]) -> list[float]:
-        pairs = [(query, doc) for doc in texts]
         t0 = time.perf_counter()
-        scores = self._model.predict(pairs, batch_size=self._batch_size).tolist()
+        rsp = self._client.post(
+            "/rerank",
+            json={"query": query, "texts": texts},
+        )
+        rsp.raise_for_status()
+        data = rsp.json()
         elapsed = time.perf_counter() - t0
         logger.info(
-            "Reranked %d docs in %.3fs (batch=%d)",
+            "Reranked %d docs in %.3fs",
             len(texts),
             elapsed,
-            self._batch_size,
         )
-        return scores
+        return data["scores"]
+
+    def close(self) -> None:
+        self._client.close()
 
 
 if __name__ == "__main__":
-    conf = Config.load()
-    client = RerankClient(conf.rag.rerank)
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--url", default="http://localhost:8002")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO)
+    client = RerankClient(args.url)
 
     query = "什么是机器学习"
     docs = [

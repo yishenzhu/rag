@@ -3,6 +3,7 @@ app:
   port: 8001
 
 rag:
+
   qdrant:
     host: "localhost"
     port: 6333
@@ -10,10 +11,12 @@ rag:
   embedding:
     model: "BAAI/bge-m3"
     batch_size: 128
+    server: "http://localhost:8002"
 
   rerank:
     model: "cross-encoder/ms-marco-MiniLM-L6-v2"
     batch_size: 256
+    server: "http://localhost:8003"
     # model: "BAAI/bge-reranker-v2-m3"
     # batch_size: 32
 

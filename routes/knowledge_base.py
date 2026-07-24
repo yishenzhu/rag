@@ -1,13 +1,11 @@
 from fastapi import APIRouter, Depends, Query
-from ..rag import Pipeline
+from ..engine import Pipeline
 from ..core import (
     ListRsp,
     CreateReq,
     CreateRsp,
     IngestReq,
     IngestRsp,
-    SearchReq,
-    SearchRsp,
     DeleteRsp,
     AppError,
 )
@@ -55,28 +53,3 @@ async def ingest(req: IngestReq, pipeline: Pipeline = Depends(Pipeline.get)):
     except AppError as e:
         return IngestRsp(collection=req.collection, error_code=e.code)
 
-
-@knowledge_router.post("/search", response_model=SearchRsp, tags=["知识库搜索"])
-async def search(req: SearchReq, pipeline: Pipeline = Depends(Pipeline.get)):
-    try:
-        results = await pipeline._knowledge.search(
-            req.collection,
-            req.queries,
-            req.top_k,
-            req.threshold,
-            req.search_type,
-            req.rerank,
-        )
-        return SearchRsp(
-            collection=req.collection,
-            queries=req.queries,
-            results=results,
-            count=len(results),
-            success=True,
-        )
-    except AppError as e:
-        return SearchRsp(
-            collection=req.collection,
-            queries=req.queries,
-            error_code=e.code,
-        )

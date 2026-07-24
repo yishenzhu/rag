@@ -21,11 +21,13 @@ class ServerConfig(BaseModel):
 class EmbeddingConfig(BaseModel):
     model: str = "BAAI/bge-m3"
     batch_size: int = 32
+    server: str = "http://localhost:8002"
 
 
 class RerankConfig(BaseModel):
     model: str = "BAAI/bge-reranker-v2-m3"
     batch_size: int = 32
+    server: str = "http://localhost:8003"
 
 
 class VectorStoreConfig(BaseModel):

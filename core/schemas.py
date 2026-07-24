@@ -30,16 +30,6 @@ Chunk: TypeAlias = Text
 Memory: TypeAlias = Text
 
 
-class EmbedReq(BaseModel):
-    texts: list[str]
-
-
-class EmbedRsp(BaseModel):
-    embeddings: list[list[float]]
-    count: int
-    dimension: int
-
-
 class CreateReq(BaseModel):
     name: str
     description: str | None = None
@@ -84,44 +74,13 @@ class IngestRsp(BaseModel):
     error_code: ErrorCode | None = None
 
 
-class AddReq(BaseModel):
-    collection: str
-    memories: list[Memory] | list[str]
-    dup_threshold: float = 0.9
-
-
-class AddRsp(BaseModel):
-    collection: str
-    success: bool = False
-    count: int = 0
-    error_code: ErrorCode | None = None
-
-
 class SearchType(StrEnum):
     DENSE = "dense"
     HYBRID = "hybrid"
 
 
-class SearchReq(BaseModel):
-    collection: str
-    queries: list[str]
-    top_k: int = 5
-    threshold: float = 0.3
-    search_type: SearchType = SearchType.DENSE
-    rerank: bool = False
-
-
 class SearchResult(BaseModel):
     payload: Text
-
-
-class SearchRsp(BaseModel):
-    collection: str
-    queries: list[str]
-    results: list[SearchResult] | None = None
-    count: int = 0
-    success: bool = False
-    error_code: ErrorCode | None = None
 
 
 class ListRsp(BaseModel):
