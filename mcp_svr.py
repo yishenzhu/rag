@@ -24,9 +24,9 @@ async def main():
 
     @mcp.tool(description="根据查询搜索用户已保存的记忆")
     async def search_memory(
-        queries: list[str] = Field(description="要搜索的记忆"),
+        query: str = Field(description="搜索查询"),
     ) -> list[SearchResult]:
-        return await pipeline._memory.search("user", queries, rerank=True)
+        return await pipeline._memory.search("user", query, rerank=True)
 
     @mcp.tool(description="获取所有已启用的知识库列表，包含文档摘要信息")
     def list_knowledge() -> list[CollectionInfo | CollectionBriefInfo]:
@@ -34,7 +34,7 @@ async def main():
 
     @mcp.tool(description="搜索知识库内容，可指定知识库名称或搜索全部已启用的知识库")
     async def search_knowledge(
-        queries: list[str] = Field(description="要搜索的相关内容"),
+        query: str = Field(description="搜索查询"),
         collection: str | None = Field(
             default=None, description="知识库名，留空则搜索全部知识库"
         ),
@@ -43,9 +43,9 @@ async def main():
     ) -> list[SearchResult]:
         if collection:
             return await pipeline._knowledge.search(
-                collection, queries, top_k=top_k, rerank=rerank
+                collection, query, top_k=top_k, rerank=rerank
             )
-        return await pipeline._knowledge.search_all(queries, top_k=top_k, rerank=rerank)
+        return await pipeline._knowledge.search_all(query, top_k=top_k, rerank=rerank)
 
     logger.info("MCP server starting on %s:%d", conf.mcp.host, conf.mcp.port)
 

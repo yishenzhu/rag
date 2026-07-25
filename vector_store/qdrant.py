@@ -1,6 +1,5 @@
 from typing import Any
 from qdrant_client import AsyncQdrantClient
-from collections import defaultdict
 from qdrant_client.http import models
 
 DENSE_VECTOR_NAME = "dense"
@@ -92,66 +91,45 @@ class VectorStore:
 
     async def query(
         self,
-        dense_vectors: list[list[float]],
+        dense_vector: list[float],
         top_k: int,
         threshold: float,
         filters: dict[str, Any] | None = None,
-        sparse_vectors: list[dict] | None = None,
+        sparse_vector: dict | None = None,
     ):
         filter_ = self.__class__.to_filter(filters) if filters else None
 
-        if sparse_vectors is None:
-            requests = [
-                models.QueryRequest(
-                    query=dv,
-                    using=DENSE_VECTOR_NAME,
-                    limit=top_k,
-                    score_threshold=threshold,
-                    with_payload=True,
-                    filter=filter_,
-                )
-                for dv in dense_vectors
-            ]
+        if sparse_vector is None:
+            request = models.QueryRequest(
+                query=dense_vector,
+                using=DENSE_VECTOR_NAME,
+                limit=top_k,
+                score_threshold=threshold,
+                with_payload=True,
+                filter=filter_,
+            )
         else:
-            requests = []
-            for dv, sv in zip(dense_vectors, sparse_vectors):
-                sv = models.SparseVector(**sv)
-                requests.append(
-                    models.QueryRequest(
-                        prefetch=[
-                            models.Prefetch(
-                                query=dv,
-                                using=DENSE_VECTOR_NAME,
-                                limit=top_k,
-                            ),
-                            models.Prefetch(
-                                query=sv, using=SPARSE_VECTOR_NAME, limit=top_k
-                            ),
-                        ],
-                        query=models.FusionQuery(fusion=models.Fusion.RRF),
+            sv = models.SparseVector(**sparse_vector)
+            request = models.QueryRequest(
+                prefetch=[
+                    models.Prefetch(
+                        query=dense_vector,
+                        using=DENSE_VECTOR_NAME,
                         limit=top_k,
-                        score_threshold=threshold,
-                        with_payload=True,
-                        filter=filter_,
-                    )
-                )
+                    ),
+                    models.Prefetch(
+                        query=sv, using=SPARSE_VECTOR_NAME, limit=top_k
+                    ),
+                ],
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                limit=top_k,
+                score_threshold=threshold,
+                with_payload=True,
+                filter=filter_,
+            )
 
-        responses = await self._client.query_batch_points(self._name, requests)
-        return self.merge(responses)
-
-    def merge(self, responses: list[models.QueryResponse], k=60):
-        if len(responses) == 1:
-            return responses[0].points
-
-        score_map = defaultdict(float)
-        point_map = {}
-        for rsp in responses:
-            for rank, point in enumerate(rsp.points):
-                score_map[point.id] += 1.0 / (k + rank)
-                point_map[point.id] = point
-
-        sorted_ids = sorted(score_map.items(), key=lambda x: x[1], reverse=True)
-        return [point_map[id] for id, _ in sorted_ids]
+        responses = await self._client.query_batch_points(self._name, [request])
+        return responses[0].points
 
     async def create(self, dims: int, metadata: dict[str, Any] | None = None):
         self._dims = dims
