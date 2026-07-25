@@ -35,12 +35,14 @@ def create_app(
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
     logger.info("Loading rerank model: %s on %s", model_name, device)
+    t0 = time.perf_counter()
     model = CrossEncoder(
         model_name,
         device=device,
         max_length=512,
     )
-    logger.info("Rerank model loaded")
+    elapsed = time.perf_counter() - t0
+    logger.info("Rerank model loaded in %.1fs", elapsed)
 
     app = FastAPI(title="Rerank Service", version="1.0.0")
 

@@ -2,6 +2,7 @@
 
 import torch
 import numpy as np
+import time
 from FlagEmbedding import BGEM3FlagModel
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -41,9 +42,11 @@ def create_app(
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
     logger.info("Loading embedding model: %s on %s", model_name, device)
+    t0 = time.perf_counter()
     model = BGEM3FlagModel(model_name, devices=device, batch_size=batch_size)
+    elapsed = time.perf_counter() - t0
     dims = model.model.model.config.hidden_size
-    logger.info("Embedding model loaded, dims=%d", dims)
+    logger.info("Embedding model loaded in %.1fs, dims=%d", elapsed, dims)
 
     app = FastAPI(title="Embedding Service", version="1.0.0")
 
