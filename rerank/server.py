@@ -15,13 +15,12 @@ logger = logging.getLogger(__name__)
 # ── 请求/响应模型 ──────────────────────────────────────────────
 
 class RerankRequest(BaseModel):
-    query: str
-    texts: list[str]
+    queries: list[str]
+    texts: list[list[str]]
 
 
 class RerankResponse(BaseModel):
-    scores: list[float]
-    count: int
+    scores: list[list[float]]
 
 
 # ── 服务主体 ────────────────────────────────────────────────────
@@ -48,12 +47,19 @@ def create_app(
 
     @app.post("/rerank", response_model=RerankResponse)
     async def rerank(req: RerankRequest):
-        pairs = [(req.query, doc) for doc in req.texts]
+        pairs = [(q, t) for q, ts in zip(req.queries, req.texts) for t in ts]
         t0 = time.perf_counter()
-        scores = model.predict(pairs, batch_size=batch_size).tolist()
+        flat = model.predict(pairs, batch_size=batch_size).tolist()
         elapsed = time.perf_counter() - t0
-        logger.info("Reranked %d docs in %.3fs", len(req.texts), elapsed)
-        return RerankResponse(scores=scores, count=len(scores))
+        total = len(pairs)
+        logger.info("Reranked %d pairs across %d queries in %.3fs", total, len(req.queries), elapsed)
+        # 按 query 切分
+        scores = []
+        idx = 0
+        for ts in req.texts:
+            scores.append(flat[idx: idx + len(ts)])
+            idx += len(ts)
+        return RerankResponse(scores=scores)
 
     @app.get("/health")
     async def health():

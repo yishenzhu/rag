@@ -91,45 +91,43 @@ class VectorStore:
 
     async def query(
         self,
-        dense_vector: list[float],
+        dense_vectors: list[list[float]],
         top_k: int,
         threshold: float,
         filters: dict[str, Any] | None = None,
-        sparse_vector: dict | None = None,
-    ):
+        sparse_vectors: list[dict | None] | None = None,
+    ) -> list[list[models.ScoredPoint]]:
+        """批量检索，返回 per-query 结果列表，不做融合。"""
         filter_ = self.__class__.to_filter(filters) if filters else None
 
-        if sparse_vector is None:
-            request = models.QueryRequest(
-                query=dense_vector,
-                using=DENSE_VECTOR_NAME,
-                limit=top_k,
-                score_threshold=threshold,
-                with_payload=True,
-                filter=filter_,
-            )
-        else:
-            sv = models.SparseVector(**sparse_vector)
-            request = models.QueryRequest(
-                prefetch=[
-                    models.Prefetch(
-                        query=dense_vector,
-                        using=DENSE_VECTOR_NAME,
-                        limit=top_k,
-                    ),
-                    models.Prefetch(
-                        query=sv, using=SPARSE_VECTOR_NAME, limit=top_k
-                    ),
-                ],
-                query=models.FusionQuery(fusion=models.Fusion.RRF),
-                limit=top_k,
-                score_threshold=threshold,
-                with_payload=True,
-                filter=filter_,
-            )
+        requests = []
+        for i, dv in enumerate(dense_vectors):
+            sv = sparse_vectors[i] if sparse_vectors else None
+            if sv is None:
+                requests.append(models.QueryRequest(
+                    query=dv,
+                    using=DENSE_VECTOR_NAME,
+                    limit=top_k,
+                    score_threshold=threshold,
+                    with_payload=True,
+                    filter=filter_,
+                ))
+            else:
+                sv = models.SparseVector(**sv)
+                requests.append(models.QueryRequest(
+                    prefetch=[
+                        models.Prefetch(query=dv, using=DENSE_VECTOR_NAME, limit=top_k),
+                        models.Prefetch(query=sv, using=SPARSE_VECTOR_NAME, limit=top_k),
+                    ],
+                    query=models.FusionQuery(fusion=models.Fusion.RRF),
+                    limit=top_k,
+                    score_threshold=threshold,
+                    with_payload=True,
+                    filter=filter_,
+                ))
 
-        responses = await self._client.query_batch_points(self._name, [request])
-        return responses[0].points
+        responses = await self._client.query_batch_points(self._name, requests)
+        return [rsp.points for rsp in responses]
 
     async def create(self, dims: int, metadata: dict[str, Any] | None = None):
         self._dims = dims

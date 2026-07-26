@@ -77,7 +77,7 @@ class Collection:
 
     async def search(
         self,
-        query: str,
+        queries: list[str],
         top_k: int,
         threshold: float,
         search_type: SearchType,
@@ -86,30 +86,38 @@ class Collection:
     ) -> list[SearchResult]:
 
         hybrid = search_type == SearchType.HYBRID and self.hybrid
-        rerank = rerank and self._rerank is not None
+        do_rerank = rerank and self._rerank is not None
 
-        dense_vecs, sparse_vecs = self._embed.encode([query], hybrid)
-        points = await self._store.query(
-            dense_vecs[0],
-            top_k * 2 if rerank else top_k,
+        dense_vectors, sparse_vectors = self._embed.encode(queries, hybrid)
+
+        # 一次 batch 检索全部 query，返回 per-query 结果
+        points_list = await self._store.query(
+            dense_vectors,
+            top_k * 2 if do_rerank else top_k,
             threshold,
             filters,
-            sparse_vecs[0] if sparse_vecs else None,
+            sparse_vectors if sparse_vectors else None,
         )
 
-        results = [SearchResult(payload=Text.model_validate(p.payload)) for p in points]
+        # 先解析全部结果
+        all_results = [
+            [SearchResult(payload=Text.model_validate(p.payload)) for p in points_list[i]]
+            for i in range(len(queries))
+        ]
 
-        if rerank and results:
-            texts = [r.payload.content for r in results]
-            scores = self._rerank.rerank(query, texts)
-            results = [
-                r
-                for _, r in sorted(
-                    zip(scores, results), key=lambda x: x[0], reverse=True
-                )
-            ]
+        # batch rerank 全部 query，一次网络调用
+        if do_rerank:
+            texts = [[r.payload.content for r in results] for results in all_results]
+            scores = self._rerank.rerank(queries, texts)
+            for i in range(len(queries)):
+                all_results[i] = [
+                    r for _, r in sorted(
+                        zip(scores[i], all_results[i]), key=lambda x: x[0], reverse=True
+                    )
+                ]
 
-        return results[:top_k]
+        # 合并去重：各 query 已在 [:top_k] 截断，按 hash_id 去重
+        return list({r.payload.hash_id: r for results in all_results for r in results[:top_k]}.values())
 
 
 class Registry:
@@ -141,7 +149,7 @@ class Registry:
     async def search(
         self,
         name: str,
-        query: str,
+        queries: list[str],
         top_k: int = 5,
         threshold: float = 0.1,
         search_type: SearchType = SearchType.DENSE,
@@ -150,12 +158,12 @@ class Registry:
     ) -> list[SearchResult]:
         collection = self.collection(name)
         return await collection.search(
-            query, top_k, threshold, search_type, rerank, filters
+            queries, top_k, threshold, search_type, rerank, filters
         )
 
     async def search_all(
         self,
-        query: str,
+        queries: list[str],
         top_k: int = 5,
         threshold: float = 0.1,
         search_type: SearchType = SearchType.DENSE,
@@ -167,28 +175,19 @@ class Registry:
 
         tasks = [
             c.search(
-                query,
+                queries,
                 top_k,
                 threshold,
                 search_type,
-                rerank=False,  # 不在 collection 内独立 rerank，汇聚后统一做
+                rerank=rerank,
             )
             for c in enabled
         ]
         batches = await asyncio.gather(*tasks)
+        # 各 collection 已去重并截断，跨 collection 仅按 hash_id 去重
         results = list({r.payload.hash_id: r for batch in batches for r in batch}.values())
 
-        if rerank and results and self._rerank:
-            texts = [r.payload.content for r in results]
-            scores = self._rerank.rerank(query, texts)
-            results = [
-                r
-                for _, r in sorted(
-                    zip(scores, results), key=lambda x: x[0], reverse=True
-                )
-            ]
-
-        return results[:top_k]
+        return results
 
     async def initialize(self, collections: list):
         for collection in collections:

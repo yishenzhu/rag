@@ -76,7 +76,7 @@ async def run_eval(
         for row in queries:
             qid, query = row["id"], row["text"]
             search_results = await pipeline._knowledge.search(
-                collection, query, k, threshold, search_type, rerank
+                collection, [query], k, threshold, search_type, rerank
             )
             results[qid] = {
                 r.payload["metadata"]["doc_id"]: r.score for r in search_results
