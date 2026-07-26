@@ -1,6 +1,6 @@
 from datetime import datetime
 from ..core import Document
-from .chunker import RecursiveChunker
+from .chunker import RecursiveChunker, SemanticChunker
 from .base import Registry
 
 
@@ -12,11 +12,18 @@ class KnowledgeBase(Registry):
         chunk_size: int | None = None,
         chunk_overlap: int | None = None,
         chunk: bool = True,
+        chunker_type: str = "recursive",
     ):
         collection = self.collection(name)
 
         if chunk:
-            chunker = RecursiveChunker(chunk_size, chunk_overlap)
+            if chunker_type == "semantic":
+                chunker = SemanticChunker(
+                    chunk_size=chunk_size or 512,
+                    embed_client=self._embedding,
+                )
+            else:
+                chunker = RecursiveChunker(chunk_size, chunk_overlap)
             texts = [chunk for doc in documents for chunk in chunker.split(doc)]
         else:
             texts = documents
