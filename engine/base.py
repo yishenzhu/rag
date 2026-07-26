@@ -101,7 +101,7 @@ class Collection:
 
         # 先解析全部结果
         all_results = [
-            [SearchResult(payload=Text.model_validate(p.payload)) for p in points_list[i]]
+            [SearchResult(payload=Text.model_validate(p.payload), score=p.score) for p in points_list[i]]
             for i in range(len(queries))
         ]
 
@@ -110,10 +110,11 @@ class Collection:
             texts = [[r.payload.content for r in results] for results in all_results]
             scores = self._rerank.rerank(queries, texts)
             for i in range(len(queries)):
+                # 按 rerank 分数排序并更新 score 字段
+                ranked = sorted(zip(scores[i], all_results[i]), key=lambda x: x[0], reverse=True)
                 all_results[i] = [
-                    r for _, r in sorted(
-                        zip(scores[i], all_results[i]), key=lambda x: x[0], reverse=True
-                    )
+                    SearchResult(payload=r.payload, score=s)
+                    for s, r in ranked
                 ]
 
         # 合并去重：各 query 已在 [:top_k] 截断，按 hash_id 去重

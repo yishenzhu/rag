@@ -79,7 +79,7 @@ async def run_eval(
                 collection, [query], k, threshold, search_type, rerank
             )
             results[qid] = {
-                r.payload["metadata"]["doc_id"]: r.score for r in search_results
+                r.payload.metadata["doc_id"]: r.score for r in search_results
             }
         ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(qrels, results, [k])
         mrr = EvaluateRetrieval.evaluate_custom(qrels, results, [k], metric="mrr")

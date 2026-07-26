@@ -81,6 +81,7 @@ class SearchType(StrEnum):
 
 class SearchResult(BaseModel):
     payload: Text
+    score: float = 0.0
 
 
 class ListRsp(BaseModel):
