@@ -45,7 +45,9 @@ async def delete_collection(name: str, pipeline: Pipeline = Depends(Pipeline.get
 async def ingest(req: IngestReq, pipeline: Pipeline = Depends(Pipeline.get)):
     try:
         await pipeline._knowledge.ingest(
-            req.collection, req.documents, req.chunk_size, req.chunk_overlap
+            req.collection, req.documents,
+            req.chunk_size, req.chunk_overlap,
+            chunker_type=req.chunker_type,
         )
         return IngestRsp(
             collection=req.collection, success=True, count=len(req.documents)

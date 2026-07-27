@@ -24,6 +24,12 @@ def main():
         help="分块重叠大小（默认由服务端决定）",
     )
     parser.add_argument(
+        "--chunker-type",
+        choices=["recursive", "semantic", "none"],
+        default=None,
+        help="切分策略（默认由服务端决定）",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=512,
@@ -63,6 +69,8 @@ def main():
                 payload["chunk_size"] = args.chunk_size
             if args.chunk_overlap is not None:
                 payload["chunk_overlap"] = args.chunk_overlap
+            if args.chunker_type is not None:
+                payload["chunker_type"] = args.chunker_type
 
             try:
                 rsp = client.post(url, json=payload)
