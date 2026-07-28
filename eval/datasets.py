@@ -41,4 +41,4 @@ def load_dataset(dataset_name: str):
             exc,
         )
         os.environ.pop("HF_DATASETS_OFFLINE", None)
-        return HFDataLoader(hf_repo=f"BeIR/{dataset_name}").load()
+        return loader.load()
