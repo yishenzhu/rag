@@ -26,7 +26,7 @@ BEIR_DATASETS = [
 
 
 def load_dataset(dataset_name: str):
-    """加载 BEIR 数据集。
+    """加载 BEIR 数据集（corpus + queries + qrels）。
 
     离线模式由进程启动时的 ``HF_HUB_OFFLINE`` 控制（eval 包导入时默认置 1）。
     数据集未缓存时，需以 ``HF_HUB_OFFLINE=0`` 重新运行以联网下载并写入缓存；
@@ -34,3 +34,9 @@ def load_dataset(dataset_name: str):
     """
     logger.info("Loading BEIR dataset from HuggingFace: %s", dataset_name)
     return HFDataLoader(hf_repo=f"BeIR/{dataset_name}").load()
+
+
+def load_corpus(dataset_name: str):
+    """仅加载 BEIR 数据集的语料（不加载 queries/qrels），用于导入。"""
+    logger.info("Loading BEIR corpus from HuggingFace: %s", dataset_name)
+    return HFDataLoader(hf_repo=f"BeIR/{dataset_name}").load_corpus()
