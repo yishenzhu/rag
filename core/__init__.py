@@ -18,6 +18,8 @@ from .schemas import (
     IngestRsp,
     ListRsp,
     SearchResult,
+    SearchReq,
+    SearchRsp,
     SearchType,
     Text,
     Document,

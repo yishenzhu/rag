@@ -11,11 +11,11 @@ class KnowledgeBase(Registry):
         documents: list[Document],
         chunk_size: int | None = None,
         chunk_overlap: int | None = None,
-        chunker_type: str = "recursive",
+        chunker_type: str | None = None,
     ):
         collection = self.collection(name)
 
-        if chunker_type == "none":
+        if chunker_type is None:
             texts = documents
         elif chunker_type == "semantic":
             chunker = SemanticChunker(

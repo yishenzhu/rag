@@ -65,7 +65,7 @@ class IngestReq(BaseModel):
     documents: list[Document]
     chunk_size: int | None = None
     chunk_overlap: int | None = None
-    chunker_type: str = "recursive"  # recursive | semantic | none
+    chunker_type: str | None = None  # None=不分块, recursive, semantic
 
 
 class IngestRsp(BaseModel):

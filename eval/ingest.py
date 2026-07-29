@@ -2,10 +2,10 @@
 
 两种数据源（二选一）：
   本地文档：python -m rag.eval.ingest <source> -c <collection>
-  BEIR 数据集：python -m rag.eval.ingest --dataset-name scifact -c eval [--chunker-type none]
+  BEIR 数据集：python -m rag.eval.ingest --dataset-name scifact -c eval
 
 通过 HTTP 调用运行中的 RAG 服务（/knowledge）完成建表与导入。
-文档级评测建议用 --chunker-type none（每篇文档一个向量）。
+默认不分块（每篇文档一个向量），适合文档级评测；如需分块用 --chunker-type recursive。
 """
 
 import argparse
@@ -26,9 +26,9 @@ def main():
     parser.add_argument("--host", default="http://localhost:8001", help="RAG 服务地址")
     parser.add_argument("--chunk-size", type=int, default=None, help="分块大小（默认由服务端决定）")
     parser.add_argument("--chunk-overlap", type=int, default=None, help="分块重叠大小（默认由服务端决定）")
-    parser.add_argument("--chunker-type", choices=["recursive", "semantic", "none"], default=None,
-                        help="切分策略（默认由服务端决定；BEIR 文档级评测建议 none）")
-    parser.add_argument("--batch-size", type=int, default=512, help="每批次导入文档数（默认 512）")
+    parser.add_argument("--chunker-type", choices=["recursive", "semantic"], default=None,
+                        help="切分策略（默认不分块；recursive 或 semantic）")
+    parser.add_argument("--batch-size", type=int, default=64, help="每批次导入文档数（默认 64）")
 
     args = parser.parse_args()
 
