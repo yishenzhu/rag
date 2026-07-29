@@ -23,6 +23,7 @@ def main():
     p_eval.add_argument("--dataset-name", required=True, choices=BEIR_DATASETS)
     p_eval.add_argument("--collection", default="eval", help="collection 名称（默认 eval）")
     p_eval.add_argument("--threshold", type=float, default=0.0)
+    p_eval.add_argument("--host", default="http://localhost:8001", help="RAG 服务地址（默认 http://localhost:8001）")
     p_eval.add_argument("--plot", action="store_true", help="评测完成后自动生成图表")
 
     # ── plot ──
@@ -33,7 +34,7 @@ def main():
 
     if args.command == "eval":
         async def _run():
-            runner = EvalRunner(args.dataset_name, args.collection, args.threshold)
+            runner = EvalRunner(args.dataset_name, args.collection, args.threshold, args.host)
             await runner.setup()
             _, paths = await runner.run_all()
 

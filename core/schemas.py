@@ -85,6 +85,22 @@ class SearchResult(BaseModel):
     score: float = 0.0
 
 
+class SearchReq(BaseModel):
+    collection: str
+    queries: list[str]
+    top_k: int = 5
+    threshold: float = 0.1
+    search_type: SearchType = SearchType.DENSE
+    rerank: bool = False
+    filters: dict[str, Any] | None = None
+
+
+class SearchRsp(BaseModel):
+    results: list[SearchResult]
+    success: bool = False
+    error_code: ErrorCode | None = None
+
+
 class ListRsp(BaseModel):
     collections: list[CollectionInfo | CollectionBriefInfo]
     count: int

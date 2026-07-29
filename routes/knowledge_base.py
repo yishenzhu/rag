@@ -7,6 +7,8 @@ from ..core import (
     IngestReq,
     IngestRsp,
     DeleteRsp,
+    SearchReq,
+    SearchRsp,
     AppError,
 )
 
@@ -54,4 +56,21 @@ async def ingest(req: IngestReq, pipeline: Pipeline = Depends(Pipeline.get)):
         )
     except AppError as e:
         return IngestRsp(collection=req.collection, error_code=e.code)
+
+
+@knowledge_router.post("/search", response_model=SearchRsp, tags=["知识库搜索"])
+async def search(req: SearchReq, pipeline: Pipeline = Depends(Pipeline.get)):
+    try:
+        results = await pipeline._knowledge.search(
+            req.collection,
+            req.queries,
+            top_k=req.top_k,
+            threshold=req.threshold,
+            search_type=req.search_type,
+            rerank=req.rerank,
+            filters=req.filters,
+        )
+        return SearchRsp(results=results, success=True)
+    except AppError as e:
+        return SearchRsp(results=[], error_code=e.code)
 

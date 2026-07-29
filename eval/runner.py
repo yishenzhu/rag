@@ -5,10 +5,10 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
+import httpx
 from beir.retrieval.evaluation import EvaluateRetrieval
 
 from ..core import Config, SearchType, auto_path, setup_logger
-from ..engine import Pipeline
 from .datasets import load_dataset
 
 logger = logging.getLogger(__name__)
@@ -33,11 +33,12 @@ class EvalRunner:
         dataset_name: str,
         collection: str = "eval",
         threshold: float = 0.0,
+        host: str = "http://localhost:8001",
     ):
         self._dataset_name = dataset_name
         self._collection = collection
         self._threshold = threshold
-        self._pipeline: Pipeline | None = None
+        self._host = host.rstrip("/")
         self._corpus: list | None = None
         self._queries: list | None = None
         self._qrels: dict | None = None
@@ -52,7 +53,12 @@ class EvalRunner:
         )
         conf = Config.load()
         setup_logger(conf.log)
-        self._pipeline = await Pipeline(conf.rag).setup()
+
+        # 验证 RAG 服务可用
+        async with httpx.AsyncClient(timeout=10) as client:
+            rsp = await client.get(f"{self._host}/health")
+            rsp.raise_for_status()
+        logger.info("RAG service is ready at %s", self._host)
         return self
 
     # ── 单 collection × 单策略 ─────────────────────────────
@@ -106,24 +112,41 @@ class EvalRunner:
         self, collection: str, search_type: SearchType, rerank: bool
     ) -> dict[str, float]:
         metrics: dict[str, float] = {}
-        for k in self.K_VALUES:
-            results: dict[str, dict[str, float]] = {}
-            for row in self._queries:
-                qid, query = row["id"], row["text"]
-                hits = await self._pipeline._knowledge.search(
-                    collection, [query], k,
-                    self._threshold, search_type, rerank,
+        url = f"{self._host}/knowledge/search"
+
+        async with httpx.AsyncClient(timeout=300) as client:
+            for k in self.K_VALUES:
+                results: dict[str, dict[str, float]] = {}
+                for row in self._queries:
+                    qid, query = row["id"], row["text"]
+                    payload = {
+                        "collection": collection,
+                        "queries": [query],
+                        "top_k": k,
+                        "threshold": self._threshold,
+                        "search_type": search_type.value,
+                        "rerank": rerank,
+                    }
+                    rsp = await client.post(url, json=payload)
+                    rsp.raise_for_status()
+                    data = rsp.json()
+
+                    if not data.get("success"):
+                        logger.error("Search failed: %s", data)
+                        raise RuntimeError(f"Search failed: {data}")
+
+                    hits = data.get("results", [])
+                    results[qid] = {
+                        r["payload"]["metadata"].get("doc_id"): r["score"] for r in hits
+                    }
+
+                ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(
+                    self._qrels, results, [k]
                 )
-                results[qid] = {
-                    r.payload.metadata["doc_id"]: r.score for r in hits
-                }
-            ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(
-                self._qrels, results, [k]
-            )
-            mrr = EvaluateRetrieval.evaluate_custom(
-                self._qrels, results, [k], metric="mrr"
-            )
-            metrics.update({**ndcg, **_map, **recall, **precision, **mrr})
+                mrr = EvaluateRetrieval.evaluate_custom(
+                    self._qrels, results, [k], metric="mrr"
+                )
+                metrics.update({**ndcg, **_map, **recall, **precision, **mrr})
         return metrics
 
     def _save_json(
