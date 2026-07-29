@@ -1,7 +1,6 @@
 """BEIR 数据集加载。"""
 
 import logging
-import os
 
 from beir.datasets.data_loader_hf import HFDataLoader
 
@@ -27,18 +26,11 @@ BEIR_DATASETS = [
 
 
 def load_dataset(dataset_name: str):
+    """加载 BEIR 数据集。
+
+    离线模式由进程启动时的 ``HF_HUB_OFFLINE`` 控制（eval 包导入时默认置 1）。
+    数据集未缓存时，需以 ``HF_HUB_OFFLINE=0`` 重新运行以联网下载并写入缓存；
+    之后的运行即可在离线模式下纯缓存命中。
+    """
     logger.info("Loading BEIR dataset from HuggingFace: %s", dataset_name)
-
-    os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
-    loader = HFDataLoader(hf_repo=f"BeIR/{dataset_name}")
-
-    try:
-        return loader.load()
-    except Exception as exc:
-        logger.warning(
-            "Offline load failed for %s, trying one-time online download: %s",
-            dataset_name,
-            exc,
-        )
-        os.environ.pop("HF_DATASETS_OFFLINE", None)
-        return loader.load()
+    return HFDataLoader(hf_repo=f"BeIR/{dataset_name}").load()

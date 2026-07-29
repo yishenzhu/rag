@@ -17,8 +17,7 @@ logger = logging.getLogger(__name__)
 class EvalRunner:
     """BEIR 评测运行器。假定 collection 已存在并已导入数据。
 
-    传入多个 collection 时会在同一份 queries/qrels 上对比检索效果。
-    只输出 JSON 报告，绘图由 plotting.py 单独完成。
+    在单个 collection 上跑全部 4 种检索组合；只输出 JSON 报告，绘图由 plotting.py 单独完成。
     """
 
     K_VALUES = [1, 10, 50, 100]
@@ -32,11 +31,11 @@ class EvalRunner:
     def __init__(
         self,
         dataset_name: str,
-        collections: list[str] | None = None,
+        collection: str = "eval",
         threshold: float = 0.0,
     ):
         self._dataset_name = dataset_name
-        self._collections = collections or ["eval"]
+        self._collection = collection
         self._threshold = threshold
         self._pipeline: Pipeline | None = None
         self._corpus: list | None = None
@@ -81,29 +80,25 @@ class EvalRunner:
         json_path = self._save_json(report, collection, search_type, rerank)
         return report, json_path
 
-    # ── 运行全部（多 collection 跨对比）────────────────────
+    # ── 运行全部（4 种检索组合）────────────────────────────
 
-    async def run_all(self) -> tuple[list[dict], dict[str, list[str]]]:
-        """返回 (all_reports, paths_by_collection)。"""
+    async def run_all(self) -> tuple[list[dict], list[str]]:
+        """返回 (all_reports, paths)。在单个 collection 上跑全部 4 种检索组合。"""
         all_reports: list[dict] = []
-        paths_by_col: dict[str, list[str]] = {}
+        paths: list[str] = []
 
-        for ci, collection in enumerate(self._collections):
-            sep = "=" * 60
-            print(f"\n{sep}\n  Collection {ci + 1}/{len(self._collections)}: {collection}\n{sep}")
+        sep = "=" * 60
+        print(f"\n{sep}\n  Collection: {self._collection}\n{sep}")
+        for i, (search_type, rerank) in enumerate(self.COMBINATIONS):
+            print(
+                f"\n  [{self._collection}] Combo {i + 1}/{len(self.COMBINATIONS)}: "
+                f"{search_type.value}{' + Rerank' if rerank else ''}"
+            )
+            report, json_path = await self.run_single(self._collection, search_type, rerank)
+            all_reports.append(report)
+            paths.append(json_path)
 
-            col_paths: list[str] = []
-            for i, (search_type, rerank) in enumerate(self.COMBINATIONS):
-                print(
-                    f"\n  [{collection}] Combo {i + 1}/4: "
-                    f"{search_type.value}{' + Rerank' if rerank else ''}"
-                )
-                report, json_path = await self.run_single(collection, search_type, rerank)
-                all_reports.append(report)
-                col_paths.append(json_path)
-            paths_by_col[collection] = col_paths
-
-        return all_reports, paths_by_col
+        return all_reports, paths
 
     # ── 内部方法 ──────────────────────────────────────────
 
