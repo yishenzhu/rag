@@ -140,7 +140,7 @@ PYTHONPATH=.. python -m rag.eval plot data/<report1>.json data/<report2>.json ..
 
 检索对比图：
 
-![SciFact 检索对比](data/scifact_scifact_dense_no_rerank_20260729_223327_cmp.png)
+![SciFact 检索对比](assets/scifact_scifact_dense_no_rerank_20260729_223327_cmp.png)
 
 > 小结：rerank 明显提升 precision 类指标（NDCG@1 / MAP@1）；hybrid 在召回率（Recall@10 / Recall@100）上优于纯 dense。
 
