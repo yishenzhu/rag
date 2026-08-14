@@ -16,10 +16,11 @@
 
 ## 快速开始
 
+> 以下命令均在**项目根目录**下执行（项目根目录即 `rag` 包的根，`main.py`、`scripts/`、`eval/` 等都在此目录下）。
+
 ### 1. 安装依赖
 
 ```bash
-cd /home/dfg/rag
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -32,7 +33,6 @@ pip install -e .
 使用项目自带管理脚本：
 
 ```bash
-cd /home/dfg/rag
 ./scripts/run.sh start
 ```
 
@@ -70,12 +70,11 @@ curl http://localhost:8001/knowledge
 
 ### 导入文档 / BEIR 数据集
 
-直接调用导入脚本：
+直接调用导入脚本（`rag` 包即项目根目录本身，`python -m rag.*` 需在项目根下把**上一级**目录加入搜索路径）：
 
 ```bash
-cd /home/dfg
-source rag/.venv/bin/activate
-python -m rag.eval.ingest <source-path> -c <collection>
+source .venv/bin/activate
+PYTHONPATH=.. python -m rag.eval.ingest <source-path> -c <collection>
 ```
 
 导入 BEIR 数据集：
@@ -103,15 +102,14 @@ curl -X POST http://localhost:8001/knowledge/search \
 
 ## 评测
 
-当前项目支持 BEIR 评测流程。示例：
+项目基于 [BEIR](https://github.com/beir-cellar/beir) 评测流程。示例（在项目根目录下）：
 
 ```bash
-cd /home/dfg
-source rag/.venv/bin/activate
-python -m rag.eval eval --dataset-name scifact --collection scifact
+source .venv/bin/activate
+PYTHONPATH=.. python -m rag.eval eval --dataset-name scifact --collection scifact
 ```
 
-这会生成 JSON 报告文件到 `rag/data/`，默认文件名类似：
+这会生成 JSON 报告文件到 `data/`，默认文件名类似：
 
 - `scifact_scifact_dense_no_rerank_<timestamp>.json`
 - `scifact_scifact_dense_rerank_<timestamp>.json`
@@ -123,12 +121,28 @@ python -m rag.eval eval --dataset-name scifact --collection scifact
 评测完成后，可使用 plot 功能生成对比图：
 
 ```bash
-cd /home/dfg
-source rag/.venv/bin/activate
-python -m rag.eval plot /home/dfg/rag/data/<report1>.json /home/dfg/rag/data/<report2>.json ...
+source .venv/bin/activate
+PYTHONPATH=.. python -m rag.eval plot data/<report1>.json data/<report2>.json ...
 ```
 
-生成的 PNG 文件会保存到 `rag/data/`。
+生成的 PNG 文件会保存到 `data/`。
+
+### 评测结果（SciFact，300 查询 / 5183 文档）
+
+各检索配置在 SciFact 数据集上的指标：
+
+| 配置 | NDCG@1 | NDCG@10 | MAP@10 | Recall@10 | MRR@10 | NDCG@100 | Recall@100 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| dense（无重排） | 0.5100 | 0.6415 | 0.5920 | 0.7751 | 0.6080 | 0.6706 | 0.9037 |
+| dense + rerank | 0.5633 | 0.6910 | 0.6508 | 0.7972 | 0.6646 | 0.7141 | 0.9137 |
+| hybrid（无重排） | 0.5100 | 0.6707 | 0.6200 | 0.8093 | 0.6420 | 0.6991 | 0.9303 |
+| hybrid + rerank | 0.5667 | 0.6999 | 0.6547 | 0.8224 | 0.6679 | 0.7136 | 0.9270 |
+
+检索对比图：
+
+![SciFact 检索对比](data/scifact_scifact_dense_no_rerank_20260729_223327_cmp.png)
+
+> 小结：rerank 明显提升 precision 类指标（NDCG@1 / MAP@1）；hybrid 在召回率（Recall@10 / Recall@100）上优于纯 dense。
 
 ## 运行环境
 
@@ -138,7 +152,7 @@ python -m rag.eval plot /home/dfg/rag/data/<report1>.json /home/dfg/rag/data/<re
 
 ## 注意事项
 
-- `python -m rag.eval` 需要从父目录运行或确保 `PYTHONPATH` 包含 `/home/dfg`。
+- `python -m rag.*` 入口需要 `rag` 包可被 Python 找到：项目根目录即 `rag` 包本身，故需在项目根目录下运行并把**上一级**目录加入搜索路径（`PYTHONPATH=..`）。完成 `pip install -e .` 后包已注册到虚拟环境，可省略该设置。
 - Qdrant collection 在服务端实际存储时使用命名空间前缀，例如 `KnowledgeBase.scifact`。
 - 如果在 `ingest` 时出现 404 或 `collection doesn't exist`，可能是 RAG 服务内存状态与 Qdrant 实际状态不同步，建议重启 RAG 服务后重新导入。
 
