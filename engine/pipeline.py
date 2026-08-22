@@ -1,9 +1,7 @@
 from qdrant_client import AsyncQdrantClient
 import asyncio
 from fastapi import FastAPI, Request
-from ..core import (
-    RAGConfig,
-)
+from ..core import RAGConfig
 from ..embedding import EmbeddingClient
 from ..rerank import RerankClient
 from .knowledge_base import KnowledgeBase
@@ -31,6 +29,12 @@ class Pipeline:
     def attach(self, app: FastAPI):
         app.state.pipeline = self
         return self
+
+    async def close(self):
+        await asyncio.gather(
+            self._embedding.aclose(),
+            self._reranker.aclose(),
+        )
 
     @classmethod
     def get(cls, request: Request) -> "Pipeline":

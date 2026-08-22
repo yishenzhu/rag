@@ -9,8 +9,11 @@ conf = Config.load()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await Pipeline(conf.rag).attach(app).setup()
-    yield
+    pipeline = await Pipeline(conf.rag).attach(app).setup()
+    try:
+        yield
+    finally:
+        await pipeline.close()
 
 
 def main():

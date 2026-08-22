@@ -35,9 +35,10 @@ class Collection:
 
     async def validate(self):
         await self._store.connect()
-        if self._embed.dims != self._store.dims:
+        dims = await self._embed.get_dims()
+        if dims != self._store.dims:
             raise ValueError(
-                f"Embedding dims {self._embed.dims} does not match collection dims {self._store.dims}"
+                f"Embedding dims {dims} does not match collection dims {self._store.dims}"
             )
         self._info = CollectionInfo.model_validate(self._store.metadata)
         return self
@@ -58,18 +59,19 @@ class Collection:
         )
 
     async def setup(self, info: CollectionInfo):
-        await self._store.create(self._embed.dims, info.model_dump())
+        dims = await self._embed.get_dims()
+        await self._store.create(dims, info.model_dump())
         self._info = info
         return self
 
-    def encode(self, texts: list[Text]):
-        return self._embed.encode([t.content for t in texts], self.hybrid)
+    async def encode(self, texts: list[Text]):
+        return await self._embed.encode([t.content for t in texts], self.hybrid)
 
     async def insert(self, texts: list[Text], dup_threshold: float | None = None):
         payloads = [text.model_dump() for text in texts]
         ids = [text.hash_id for text in texts]
 
-        dense_vectors, sparse_vectors = self.encode(texts)
+        dense_vectors, sparse_vectors = await self.encode(texts)
 
         await self._store.insert(
             payloads, ids, dense_vectors, sparse_vectors, dup_threshold
@@ -88,7 +90,7 @@ class Collection:
         hybrid = search_type == SearchType.HYBRID and self.hybrid
         do_rerank = rerank and self._rerank is not None
 
-        dense_vectors, sparse_vectors = self._embed.encode(queries, hybrid)
+        dense_vectors, sparse_vectors = await self._embed.encode(queries, hybrid)
 
         # 一次 batch 检索全部 query，返回 per-query 结果
         points_list = await self._store.query(
@@ -108,7 +110,7 @@ class Collection:
         # batch rerank 全部 query，一次网络调用
         if do_rerank:
             texts = [[r.payload.content for r in results] for results in all_results]
-            scores = self._rerank.rerank(queries, texts)
+            scores = await self._rerank.rerank(queries, texts)
             for i in range(len(queries)):
                 # 按 rerank 分数排序并更新 score 字段
                 ranked = sorted(zip(scores[i], all_results[i]), key=lambda x: x[0], reverse=True)

@@ -22,7 +22,11 @@ class KnowledgeBase(Registry):
                 chunk_size=chunk_size or 512,
                 embed_client=self._embedding,
             )
-            texts = [chunk for doc in documents for chunk in chunker.split(doc)]
+            texts = [
+                chunk
+                for doc in documents
+                for chunk in await chunker.split(doc)
+            ]
         else:
             chunker = RecursiveChunker(chunk_size, chunk_overlap)
             texts = [chunk for doc in documents for chunk in chunker.split(doc)]

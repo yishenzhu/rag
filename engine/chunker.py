@@ -73,13 +73,13 @@ class SemanticChunker:
         self._embed = embed_client
         self._percentile = percentile  # 低于此分位数的相似度视为断点
 
-    def split(self, doc: Document) -> list[Chunk]:
+    async def split(self, doc: Document) -> list[Chunk]:
         sentences = self._split_sentences(doc.content)
         if len(sentences) <= 1:
             return self._build_chunks([doc.content], doc)
 
         # 批量编码
-        dense, _ = self._embed.encode(sentences)
+        dense, _ = await self._embed.encode(sentences)
 
         # 相邻句子相似度
         sims = np.array(

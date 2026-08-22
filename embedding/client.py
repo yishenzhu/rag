@@ -6,16 +6,15 @@ logger = logging.getLogger(__name__)
 
 
 class EmbeddingClient:
-
     def __init__(self, base_url: str):
-        self._client = httpx.Client(base_url=base_url.rstrip("/"), timeout=120)
+        self._client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=120)
         self._dims: int | None = None
         logger.info("EmbeddingClient connected to %s", base_url)
 
-    def encode(
+    async def encode(
         self, texts: list[str], hybrid: bool = False
     ) -> tuple[np.ndarray, list[dict] | None]:
-        rsp = self._client.post(
+        rsp = await self._client.post(
             "/embed",
             json={"texts": texts, "hybrid": hybrid},
         )
@@ -26,13 +25,12 @@ class EmbeddingClient:
         sparse = data.get("sparse_vectors")
         return dense, sparse
 
-    @property
-    def dims(self) -> int:
+    async def get_dims(self) -> int:
         if self._dims is None:
-            rsp = self._client.get("/dims")
+            rsp = await self._client.get("/dims")
             rsp.raise_for_status()
             self._dims = rsp.json()["dims"]
         return self._dims
 
-    def close(self) -> None:
-        self._client.close()
+    async def aclose(self) -> None:
+        await self._client.aclose()
