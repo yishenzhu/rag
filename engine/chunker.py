@@ -6,7 +6,9 @@ from ..core import Document, Chunk
 class RecursiveChunker:
     def __init__(self, chunk_size: int, chunk_overlap: int):
         self._chunk_size = chunk_size or 512
-        self._chunk_overlap = chunk_overlap or 64
+        # 钳制 overlap 严格小于 chunk_size，保证 _fixed_split 步进恒为正（防死循环）
+        overlap = chunk_overlap or 64
+        self._chunk_overlap = min(overlap, self._chunk_size - 1) if self._chunk_size > 1 else 0
 
     def split(self, doc: Document) -> list[Chunk]:
         seprators = ["\n\n", "\n", "。", ".", " "]
@@ -258,14 +260,17 @@ class MarkdownChunker:
             else:
                 buf.append(line)
 
-        append_buf()
-        if not roots and buf:
+        # 收尾：有标题则把剩余正文归属到当前章节；无标题但有正文则作根节点
+        if roots:
+            append_buf()
+        else:
             content = "\n".join(buf).strip("\n")
             buf.clear()
-            roots.append({
-                "level": 1, "title": "", "content": content,
-                "header_line": "", "header_chain": ("",), "children": [],
-            })
+            if content:
+                roots.append({
+                    "level": 1, "title": "", "content": content,
+                    "header_line": "", "header_chain": ("",), "children": [],
+                })
         return roots
 
     @staticmethod
