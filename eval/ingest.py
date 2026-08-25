@@ -1,7 +1,7 @@
 """加载文档或 BEIR 数据集，导入到 RAG 知识库。
 
 两种数据源（二选一）：
-  本地文档：python -m rag.eval.ingest <source> -c <collection>
+  本地文档：python -m rag.eval.ingest --path <路径> -c <collection>
   BEIR 数据集：python -m rag.eval.ingest --dataset-name scifact -c eval
 
 通过 HTTP 调用运行中的 RAG 服务（/knowledge）完成建表与导入。
@@ -20,27 +20,27 @@ from .datasets import load_corpus
 
 def main():
     parser = argparse.ArgumentParser(description="导入文档/BEIR 数据集到 RAG 知识库")
-    parser.add_argument("source", nargs="?", help="文档文件或目录路径（与 --dataset-name 二选一）")
-    parser.add_argument("--dataset-name", help="BEIR 数据集名称（如 scifact），与 source 二选一")
+    parser.add_argument("--path", metavar="PATH", help="文档文件或目录路径（与 --dataset-name 二选一）")
+    parser.add_argument("--dataset-name", help="BEIR 数据集名称（如 scifact），与 path 二选一")
     parser.add_argument("-c", "--collection", required=True, help="目标知识库名称")
     parser.add_argument("--host", default="http://localhost:8001", help="RAG 服务地址")
     parser.add_argument("--chunk-size", type=int, default=None, help="分块大小（默认由服务端决定）")
     parser.add_argument("--chunk-overlap", type=int, default=None, help="分块重叠大小（默认由服务端决定）")
-    parser.add_argument("--chunker-type", choices=["recursive", "semantic"], default=None,
-                        help="切分策略（默认不分块；recursive 或 semantic）")
+    parser.add_argument("--chunker-type", choices=["recursive", "semantic", "markdown"], default=None,
+                        help="切分策略（默认不分块；recursive、semantic 或 markdown）")
     parser.add_argument("--batch-size", type=int, default=64, help="每批次导入文档数（默认 64）")
 
     args = parser.parse_args()
 
-    if bool(args.source) == bool(args.dataset_name):
-        parser.error("必须且只能指定 source 或 --dataset-name 之一")
+    if bool(args.path) == bool(args.dataset_name):
+        parser.error("必须且只能指定 path 或 --dataset-name 之一")
 
     # 加载文档
     if args.dataset_name:
         documents = _load_dataset_corpus(args.dataset_name)
     else:
         try:
-            documents = DocumentLoader().load(args.source)
+            documents = DocumentLoader().load(args.path)
         except (FileNotFoundError, ValueError) as e:
             print(f"[错误] {e}", file=sys.stderr)
             sys.exit(1)

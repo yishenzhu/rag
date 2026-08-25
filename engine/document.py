@@ -25,8 +25,8 @@ class DocumentLoader:
     def __init__(self):
         self._converter = MarkItDown()
 
-    def load(self, source: str) -> list[Document]:
-        source = Path(source)
+    def load(self, path: str) -> list[Document]:
+        source = Path(path)
         if not source.exists():
             raise FileNotFoundError(f"{source} does not exist")
         if source.is_dir():
@@ -46,16 +46,16 @@ class DocumentLoader:
             return []
 
         metadata = {
-            "name": source.name,
+            "source": source.name,
         }
         return [Document(content=content, metadata=metadata)]
 
-    def _read_auto_encoding(self, source: Path) -> str:
+    def _read_auto_encoding(self, path: Path) -> str:
         encodings = ["utf-8", "gbk", "gb2312", "latin-1"]
 
         for encoding in encodings:
             try:
-                return source.read_text(encoding=encoding)
+                return path.read_text(encoding=encoding)
             except UnicodeDecodeError:
                 logger.info(f"Failed to decode {source} with {encoding}")
                 continue

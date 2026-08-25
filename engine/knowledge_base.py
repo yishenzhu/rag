@@ -1,6 +1,6 @@
 from datetime import datetime
 from ..core import Document
-from .chunker import RecursiveChunker, SemanticChunker
+from .chunker import RecursiveChunker, SemanticChunker, MarkdownChunker
 from .base import Registry
 
 
@@ -27,6 +27,9 @@ class KnowledgeBase(Registry):
                 for doc in documents
                 for chunk in await chunker.split(doc)
             ]
+        elif chunker_type == "markdown":
+            chunker = MarkdownChunker(chunk_size or 512, chunk_overlap)
+            texts = [chunk for doc in documents for chunk in chunker.split(doc)]
         else:
             chunker = RecursiveChunker(chunk_size, chunk_overlap)
             texts = [chunk for doc in documents for chunk in chunker.split(doc)]
