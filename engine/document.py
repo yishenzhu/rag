@@ -1,6 +1,8 @@
-from pathlib import Path
-from markitdown import MarkItDown
 import logging
+from pathlib import Path
+
+from markitdown import MarkItDown
+
 from ..core import Document
 
 DOC_EXTENSIONS = {
@@ -20,6 +22,7 @@ DOC_EXTENSIONS = {
 }
 
 logger = logging.getLogger(__name__)
+
 
 class DocumentLoader:
     def __init__(self):
@@ -57,7 +60,7 @@ class DocumentLoader:
             try:
                 return path.read_text(encoding=encoding)
             except UnicodeDecodeError:
-                logger.info(f"Failed to decode {source} with {encoding}")
+                logger.info(f"Failed to decode {path} with {encoding}")
                 continue
         return ""
 

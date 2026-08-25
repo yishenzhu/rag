@@ -103,7 +103,10 @@ class Collection:
 
         # 先解析全部结果
         all_results = [
-            [SearchResult(payload=Text.model_validate(p.payload), score=p.score) for p in points_list[i]]
+            [
+                SearchResult(payload=Text.model_validate(p.payload), score=p.score)
+                for p in points_list[i]
+            ]
             for i in range(len(queries))
         ]
 
@@ -113,14 +116,19 @@ class Collection:
             scores = await self._rerank.rerank(queries, texts)
             for i in range(len(queries)):
                 # 按 rerank 分数排序并更新 score 字段
-                ranked = sorted(zip(scores[i], all_results[i]), key=lambda x: x[0], reverse=True)
+                ranked = sorted(
+                    zip(scores[i], all_results[i]), key=lambda x: x[0], reverse=True
+                )
                 all_results[i] = [
-                    SearchResult(payload=r.payload, score=s)
-                    for s, r in ranked
+                    SearchResult(payload=r.payload, score=s) for s, r in ranked
                 ]
 
         # 合并去重：各 query 已在 [:top_k] 截断，按 hash_id 去重
-        return list({r.payload.hash_id: r for results in all_results for r in results[:top_k]}.values())
+        return list(
+            {
+                r.payload.hash_id: r for results in all_results for r in results[:top_k]
+            }.values()
+        )
 
 
 class Registry:
@@ -188,7 +196,9 @@ class Registry:
         ]
         batches = await asyncio.gather(*tasks)
         # 各 collection 已去重并截断，跨 collection 仅按 hash_id 去重
-        results = list({r.payload.hash_id: r for batch in batches for r in batch}.values())
+        results = list(
+            {r.payload.hash_id: r for batch in batches for r in batch}.values()
+        )
 
         return results
 

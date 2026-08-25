@@ -1,6 +1,8 @@
 import re
+
 import numpy as np
-from ..core import Document, Chunk
+
+from ..core import Chunk, Document
 
 
 class RecursiveChunker:
@@ -8,7 +10,9 @@ class RecursiveChunker:
         self._chunk_size = chunk_size or 512
         # 钳制 overlap 严格小于 chunk_size，保证 _fixed_split 步进恒为正（防死循环）
         overlap = chunk_overlap or 64
-        self._chunk_overlap = min(overlap, self._chunk_size - 1) if self._chunk_size > 1 else 0
+        self._chunk_overlap = (
+            min(overlap, self._chunk_size - 1) if self._chunk_size > 1 else 0
+        )
 
     def split(self, doc: Document) -> list[Chunk]:
         seprators = ["\n\n", "\n", "。", ".", " "]
@@ -85,10 +89,7 @@ class SemanticChunker:
 
         # 相邻句子相似度
         sims = np.array(
-            [
-                _cosine_sim(dense[i], dense[i + 1])
-                for i in range(len(sentences) - 1)
-            ]
+            [_cosine_sim(dense[i], dense[i + 1]) for i in range(len(sentences) - 1)]
         )
 
         # 动态阈值：低于分位数的位置就是断点
@@ -205,10 +206,10 @@ class MarkdownChunker:
         code_fences = ("```", "~~~")
         lines = text.split("\n")
         roots: list[dict] = []
-        stack: list[dict] = []   # 祖先链，栈顶 = 当前最深章节
+        stack: list[dict] = []  # 祖先链，栈顶 = 当前最深章节
         in_code = False
         fence = ""
-        buf: list[str] = []      # 待归属的正文（属于当前章节）
+        buf: list[str] = []  # 待归属的正文（属于当前章节）
 
         def pop_to(level: int) -> None:
             while stack and stack[-1]["level"] >= level:
@@ -241,7 +242,8 @@ class MarkdownChunker:
         for line in lines:
             stripped = line.strip()
             if not in_code and (
-                stripped.startswith(code_fences[0]) or stripped.startswith(code_fences[1])
+                stripped.startswith(code_fences[0])
+                or stripped.startswith(code_fences[1])
             ):
                 fence = stripped[:3]
                 in_code = True
@@ -267,10 +269,16 @@ class MarkdownChunker:
             content = "\n".join(buf).strip("\n")
             buf.clear()
             if content:
-                roots.append({
-                    "level": 1, "title": "", "content": content,
-                    "header_line": "", "header_chain": ("",), "children": [],
-                })
+                roots.append(
+                    {
+                        "level": 1,
+                        "title": "",
+                        "content": content,
+                        "header_line": "",
+                        "header_chain": ("",),
+                        "children": [],
+                    }
+                )
         return roots
 
     @staticmethod

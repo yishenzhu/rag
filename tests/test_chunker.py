@@ -1,6 +1,6 @@
 """MarkdownChunker 行为测试。"""
-import pytest
 
+import pytest
 from rag.core import Document
 from rag.engine.chunker import MarkdownChunker
 
@@ -33,13 +33,19 @@ def test_code_block_preserved_and_no_fake_heading():
 
 def test_oversized_section_recurses_to_children():
     """超长章节递归下沉到子标题。"""
-    md = "# 文档\n\n## 长章\n" + ("内容很长" * 50) + "\n\n### 子节A\nA。\n\n### 子节B\nB。\n"
+    md = (
+        "# 文档\n\n## 长章\n"
+        + ("内容很长" * 50)
+        + "\n\n### 子节A\nA。\n\n### 子节B\nB。\n"
+    )
     chunks = MarkdownChunker(chunk_size=20).split(_doc(md))
     # 长正文被切分，子节 A/B 各自成块
     contents = "".join(c.content for c in chunks)
     assert "子节A" in contents or "A。" in contents
     assert "子节B" in contents or "B。" in contents
-    assert all(len(c.content) <= 20 or "A。" in c.content or "B。" in c.content for c in chunks)
+    assert all(
+        len(c.content) <= 20 or "A。" in c.content or "B。" in c.content for c in chunks
+    )
 
 
 def test_no_heading_document():
