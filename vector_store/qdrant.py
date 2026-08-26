@@ -35,13 +35,18 @@ class VectorStore:
 
     @classmethod
     def to_filter(cls, filters: list[FilterRule] | None) -> models.Filter | None:
-        """把过滤规则列表翻译成 Qdrant Filter。返回 None 表示不过滤。"""
+        """把过滤规则列表翻译成 Qdrant Filter。返回 None 表示不过滤。
+
+        filter 规则的 key 是 metadata 字段名（如 speaker/timestamp），
+        payload 中这些字段实际存于嵌套的 metadata 对象下，故映射为
+        metadata.<key> 作为 Qdrant 过滤路径。
+        """
         if not filters:
             return None
 
         conditions = []
         for rule in filters:
-            key = rule.key
+            key = f"metadata.{rule.key}"
             op = rule.operator
             value = rule.value
 
