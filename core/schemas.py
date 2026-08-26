@@ -1,4 +1,5 @@
 import hashlib
+import json
 from datetime import datetime
 from enum import StrEnum
 from typing import Any, TypeAlias
@@ -23,7 +24,10 @@ class Text(BaseModel):
 
     @property
     def hash_id(self):
-        return hashlib.md5(self.content.encode()).hexdigest()
+        # 去重键：content + metadata 一起序列化，sort_keys 保证键序稳定。
+        # metadata 不同则不去重（如 content 相同但 datetime 不同的会话各自保留）。
+        payload = json.dumps(self.model_dump(), sort_keys=True, ensure_ascii=False)
+        return hashlib.md5(payload.encode()).hexdigest()
 
 
 Document: TypeAlias = Text
