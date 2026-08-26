@@ -1,9 +1,11 @@
 import logging
+
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from .core import Config, SearchResult, CollectionInfo, CollectionBriefInfo
+
+from .core import CollectionInfo, Config, FilterRule, SearchResult
 from .engine import Pipeline
 
 logger = logging.getLogger(__name__)
@@ -24,23 +26,22 @@ async def main():
     async def search_memory(queries: list[str]) -> list[SearchResult]:
         return await pipeline._memory.search("user", queries, rerank=True)
 
-    @mcp.tool(description="获取知识库列表")
-    def list_knowledge() -> list[CollectionInfo | CollectionBriefInfo]:
-        return pipeline._knowledge.list_collections(True, True)
+    @mcp.tool(description="列出所有知识库")
+    async def list_knowledge() -> list[CollectionInfo]:
+        return pipeline._knowledge.list_collections(True, False)
 
-    @mcp.tool(description="搜索知识库内容")
+    @mcp.tool(description="搜索指定知识库")
     async def search_knowledge(
         queries: list[str] = Field(description="搜索查询列表"),
-        collection: str | None = Field(
-            default=None, description="知识库名，留空则搜索全部知识库"
-        ),
+        collection: str = Field(description="知识库名"),
         top_k: int = Field(default=5, description="返回条数"),
+        filters: list[FilterRule] | None = Field(
+            default=None, description="元数据过滤规则列表"
+        ),
     ) -> list[SearchResult]:
-        if collection:
-            return await pipeline._knowledge.search(
-                collection, queries, top_k=top_k, rerank=True
-            )
-        return await pipeline._knowledge.search_all(queries, top_k=top_k, rerank=True)
+        return await pipeline._knowledge.search(
+            collection, queries, top_k=top_k, rerank=True, filters=filters
+        )
 
     logger.info("MCP server starting on %s:%d", conf.mcp.host, conf.mcp.port)
 

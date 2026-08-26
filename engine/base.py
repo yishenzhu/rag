@@ -1,19 +1,22 @@
-from qdrant_client import AsyncQdrantClient
-from typing import Any
 import asyncio
 import logging
-from ..embedding import EmbeddingClient
-from ..vector_store import VectorStore
-from ..rerank import RerankClient
+from typing import Any
+
+from qdrant_client import AsyncQdrantClient
+
 from ..core import (
-    Text,
-    CollectionInfo,
+    AppError,
     CollectionBriefInfo,
+    CollectionInfo,
+    ErrorCode,
+    FilterRule,
     SearchResult,
     SearchType,
-    AppError,
-    ErrorCode,
+    Text,
 )
+from ..embedding import EmbeddingClient
+from ..rerank import RerankClient
+from ..vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +87,7 @@ class Collection:
         threshold: float,
         search_type: SearchType,
         rerank: bool = False,
-        filters: dict[str, Any] | None = None,
+        filters: list[FilterRule] | None = None,
     ) -> list[SearchResult]:
 
         hybrid = search_type == SearchType.HYBRID and self.hybrid
@@ -165,42 +168,12 @@ class Registry:
         threshold: float = 0.1,
         search_type: SearchType = SearchType.DENSE,
         rerank: bool = False,
-        filters: dict[str, Any] | None = None,
+        filters: list[FilterRule] | None = None,
     ) -> list[SearchResult]:
         collection = self.collection(name)
         return await collection.search(
             queries, top_k, threshold, search_type, rerank, filters
         )
-
-    async def search_all(
-        self,
-        queries: list[str],
-        top_k: int = 5,
-        threshold: float = 0.1,
-        search_type: SearchType = SearchType.DENSE,
-        rerank: bool = False,
-    ) -> list[SearchResult]:
-        enabled = [c for c in self._collections.values() if c.enabled]
-        if not enabled:
-            return []
-
-        tasks = [
-            c.search(
-                queries,
-                top_k,
-                threshold,
-                search_type,
-                rerank=rerank,
-            )
-            for c in enabled
-        ]
-        batches = await asyncio.gather(*tasks)
-        # 各 collection 已去重并截断，跨 collection 仅按 hash_id 去重
-        results = list(
-            {r.payload.hash_id: r for batch in batches for r in batch}.values()
-        )
-
-        return results
 
     async def initialize(self, collections: list):
         for collection in collections:

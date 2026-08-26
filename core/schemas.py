@@ -1,8 +1,9 @@
-from pydantic import BaseModel, Field
-from typing import Any, TypeAlias
-from datetime import datetime
 import hashlib
+from datetime import datetime
 from enum import StrEnum
+from typing import Any, TypeAlias
+
+from pydantic import BaseModel, Field
 
 
 class ErrorCode(StrEnum):
@@ -35,6 +36,7 @@ class CreateReq(BaseModel):
     description: str | None = None
     enabled: bool = True
     hybrid: bool = True
+    fields: list[dict[str, str]] = Field(default_factory=list)
 
 
 class CreateRsp(BaseModel):
@@ -53,11 +55,14 @@ class CollectionInfo(CreateReq):
     created_at: str = Field(
         default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     )
+    # 该库可用的 metadata 字段 schema，供 AI 构造过滤规则
+    fields: list[dict[str, str]] = Field(default_factory=list)
 
 
 class CollectionBriefInfo(BaseModel):
     name: str
     description: str | None = None
+    fields: list[dict[str, str]] = Field(default_factory=list)
 
 
 class IngestReq(BaseModel):
@@ -80,6 +85,26 @@ class SearchType(StrEnum):
     HYBRID = "hybrid"
 
 
+class FilterOperator(StrEnum):
+    EQ = "eq"
+    IN = "in"
+    GT = "gt"
+    GTE = "gte"
+    LT = "lt"
+    LTE = "lte"
+    EXISTS = "exists"
+
+
+class FilterRule(BaseModel):
+    """一条元数据过滤规则。"""
+
+    key: str = Field(description="字段名")
+    operator: FilterOperator = Field(
+        default=FilterOperator.EQ, description="过滤操作符"
+    )
+    value: Any | None = Field(default=None, description="匹配值")
+
+
 class SearchResult(BaseModel):
     payload: Text
     score: float = 0.0
@@ -92,7 +117,7 @@ class SearchReq(BaseModel):
     threshold: float = 0.1
     search_type: SearchType = SearchType.DENSE
     rerank: bool = False
-    filters: dict[str, Any] | None = None
+    filters: list[FilterRule] | None = None
 
 
 class SearchRsp(BaseModel):

@@ -1,6 +1,9 @@
 from typing import Any
+
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models
+
+from ..core import FilterOperator, FilterRule
 
 DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "sparse"
@@ -31,16 +34,50 @@ class VectorStore:
         return self._dims
 
     @classmethod
-    def to_filter(cls, filters: dict[str, Any]) -> models.Filter:
+    def to_filter(cls, filters: list[FilterRule] | None) -> models.Filter | None:
+        """把过滤规则列表翻译成 Qdrant Filter。返回 None 表示不过滤。"""
+        if not filters:
+            return None
+
         conditions = []
-        for key, value in filters.items():
-            conditions.append(
-                models.FieldCondition(
-                    key=key,
-                    match=models.MatchValue(value=value),
+        for rule in filters:
+            key = rule.key
+            op = rule.operator
+            value = rule.value
+
+            if op == FilterOperator.EQ:
+                conditions.append(
+                    models.FieldCondition(key=key, match=models.MatchValue(value=value))
                 )
-            )
-        return models.Filter(must=conditions)
+            elif op == FilterOperator.IN:
+                values = value if isinstance(value, list) else [value]
+                conditions.append(
+                    models.FieldCondition(key=key, match=models.MatchAny(any=values))
+                )
+            elif op == FilterOperator.GT:
+                conditions.append(
+                    models.FieldCondition(key=key, range=models.Range(gt=value))
+                )
+            elif op == FilterOperator.GTE:
+                conditions.append(
+                    models.FieldCondition(key=key, range=models.Range(gte=value))
+                )
+            elif op == FilterOperator.LT:
+                conditions.append(
+                    models.FieldCondition(key=key, range=models.Range(lt=value))
+                )
+            elif op == FilterOperator.LTE:
+                conditions.append(
+                    models.FieldCondition(key=key, range=models.Range(lte=value))
+                )
+            elif op == FilterOperator.EXISTS:
+                # exists=True -> 字段存在; exists=False -> 字段不存在
+                if value is False:
+                    conditions.append(models.FieldCondition(key=key, is_empty=True))
+                else:
+                    conditions.append(models.FieldCondition(key=key, is_null=False))
+
+        return models.Filter(must=conditions) if conditions else None
 
     async def insert(
         self,
@@ -94,7 +131,7 @@ class VectorStore:
         dense_vectors: list[list[float]],
         top_k: int,
         threshold: float,
-        filters: dict[str, Any] | None = None,
+        filters: list[FilterRule] | None = None,
         sparse_vectors: list[dict | None] | None = None,
     ) -> list[list[models.ScoredPoint]]:
         """批量检索，返回 per-query 结果列表，不做融合。"""
@@ -104,27 +141,35 @@ class VectorStore:
         for i, dv in enumerate(dense_vectors):
             sv = sparse_vectors[i] if sparse_vectors else None
             if sv is None:
-                requests.append(models.QueryRequest(
-                    query=dv,
-                    using=DENSE_VECTOR_NAME,
-                    limit=top_k,
-                    score_threshold=threshold,
-                    with_payload=True,
-                    filter=filter_,
-                ))
+                requests.append(
+                    models.QueryRequest(
+                        query=dv,
+                        using=DENSE_VECTOR_NAME,
+                        limit=top_k,
+                        score_threshold=threshold,
+                        with_payload=True,
+                        filter=filter_,
+                    )
+                )
             else:
                 sv = models.SparseVector(**sv)
-                requests.append(models.QueryRequest(
-                    prefetch=[
-                        models.Prefetch(query=dv, using=DENSE_VECTOR_NAME, limit=top_k),
-                        models.Prefetch(query=sv, using=SPARSE_VECTOR_NAME, limit=top_k),
-                    ],
-                    query=models.FusionQuery(fusion=models.Fusion.RRF),
-                    limit=top_k,
-                    score_threshold=threshold,
-                    with_payload=True,
-                    filter=filter_,
-                ))
+                requests.append(
+                    models.QueryRequest(
+                        prefetch=[
+                            models.Prefetch(
+                                query=dv, using=DENSE_VECTOR_NAME, limit=top_k
+                            ),
+                            models.Prefetch(
+                                query=sv, using=SPARSE_VECTOR_NAME, limit=top_k
+                            ),
+                        ],
+                        query=models.FusionQuery(fusion=models.Fusion.RRF),
+                        limit=top_k,
+                        score_threshold=threshold,
+                        with_payload=True,
+                        filter=filter_,
+                    )
+                )
 
         responses = await self._client.query_batch_points(self._name, requests)
         return [rsp.points for rsp in responses]
