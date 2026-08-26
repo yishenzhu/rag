@@ -1,9 +1,11 @@
 import logging
+
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from .core import Config, SearchResult, CollectionInfo, CollectionBriefInfo
+
+from .core import CollectionBriefInfo, CollectionInfo, Config, SearchResult
 from .engine import Pipeline
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,16 @@ async def main():
                 collection, queries, top_k=top_k, rerank=True
             )
         return await pipeline._knowledge.search_all(queries, top_k=top_k, rerank=True)
+
+    @mcp.tool(description="将文本编码为稠密向量")
+    async def embed_texts(
+        texts: list[str] = Field(description="要编码的文本列表"),
+    ) -> list[dict]:
+        dense, _ = await pipeline._embedding.encode(texts, hybrid=False)
+        return [
+            {"index": i, "dense": [float(x) for x in vec]}
+            for i, vec in enumerate(dense)
+        ]
 
     logger.info("MCP server starting on %s:%d", conf.mcp.host, conf.mcp.port)
 
