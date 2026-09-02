@@ -2,8 +2,8 @@
 
 import json
 import logging
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 import httpx
 from beir.retrieval.evaluation import EvaluateRetrieval
@@ -49,7 +49,9 @@ class EvalRunner:
         self._corpus, self._queries, self._qrels = load_dataset(self._dataset_name)
         logger.info(
             "Dataset loaded: %d corpus, %d queries, %d qrels",
-            len(self._corpus), len(self._queries), len(self._qrels),
+            len(self._corpus),
+            len(self._queries),
+            len(self._qrels),
         )
         conf = Config.load()
         setup_logger(conf.log)
@@ -100,7 +102,9 @@ class EvalRunner:
                 f"\n  [{self._collection}] Combo {i + 1}/{len(self.COMBINATIONS)}: "
                 f"{search_type.value}{' + Rerank' if rerank else ''}"
             )
-            report, json_path = await self.run_single(self._collection, search_type, rerank)
+            report, json_path = await self.run_single(
+                self._collection, search_type, rerank
+            )
             all_reports.append(report)
             paths.append(json_path)
 
@@ -136,8 +140,10 @@ class EvalRunner:
                         raise RuntimeError(f"Search failed: {data}")
 
                     hits = data.get("results", [])
+
                     results[qid] = {
-                        r["payload"]["metadata"].get("doc_id"): r["score"] for r in hits
+                        r["payload"]["metadata"].get("doc_id"): rank
+                        for rank, r in enumerate(hits)
                     }
 
                 ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(

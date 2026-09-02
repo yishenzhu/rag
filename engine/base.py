@@ -104,34 +104,30 @@ class Collection:
             sparse_vectors if sparse_vectors else None,
         )
 
-        # 先解析全部结果
+        # 先解析全部结果。多查询的原始分数跨 query 不可比，扁平化去重后
+        # 无法区分分数来自哪个 query，故不对外暴露 score 字段。
         all_results = [
-            [
-                SearchResult(payload=Text.model_validate(p.payload), score=p.score)
-                for p in points_list[i]
-            ]
+            [Text.model_validate(p.payload) for p in points_list[i]]
             for i in range(len(queries))
         ]
 
-        # batch rerank 全部 query，一次网络调用
+        # batch rerank 全部 query，一次网络调用。rerank 分数仅用于组内排序，
         if do_rerank:
-            texts = [[r.payload.content for r in results] for results in all_results]
+            texts = [[t.content for t in results] for results in all_results]
             scores = await self._rerank.rerank(queries, texts)
             for i in range(len(queries)):
-                # 按 rerank 分数排序并更新 score 字段
                 ranked = sorted(
                     zip(scores[i], all_results[i]), key=lambda x: x[0], reverse=True
                 )
-                all_results[i] = [
-                    SearchResult(payload=r.payload, score=s) for s, r in ranked
-                ]
+                all_results[i] = [t for _, t in ranked]
 
-        # 合并去重：各 query 已在 [:top_k] 截断，按 hash_id 去重
-        return list(
-            {
-                r.payload.hash_id: r for results in all_results for r in results[:top_k]
+        # 合并去重：各 query 已在 [:top_k] 截断，按 hash_id 去重。
+        return [
+            SearchResult(payload=t)
+            for t in {
+                t.hash_id: t for results in all_results for t in results[:top_k]
             }.values()
-        )
+        ]
 
 
 class Registry:
