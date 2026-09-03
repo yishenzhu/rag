@@ -1,0 +1,153 @@
+{
+  "dataset": "lihua",
+  "num_samples": 64,
+  "metrics": {
+    "num_samples": 64,
+    "overall": {
+      "num_samples": 64,
+      "abstain": 0.2969,
+      "cumulative_recall": 0.8836,
+      "docs_total": 32.1719,
+      "docs_unique": 16.7031,
+      "evidence_count": 1.125,
+      "first_round_recall": 0.7931,
+      "has_error": 0.0,
+      "num_calls": 3.3125,
+      "num_queries": 9.6875,
+      "num_rounds": 2.3438,
+      "redundant_calls": 0.2031,
+      "rounds_to_full_recall": 1.28,
+      "full_recall_rate": 0.7812,
+      "avg_rounds_to_full_recall": 1.28
+    },
+    "by_type": {
+      "Multi": {
+        "num_samples": 7,
+        "abstain": 0.2857,
+        "cumulative_recall": 0.8929,
+        "docs_total": 33.7143,
+        "docs_unique": 16.8571,
+        "evidence_count": 3.0,
+        "first_round_recall": 0.8571,
+        "has_error": 0.0,
+        "num_calls": 3.1429,
+        "num_queries": 9.2857,
+        "num_rounds": 1.8571,
+        "redundant_calls": 0.0,
+        "rounds_to_full_recall": 1.0,
+        "full_recall_rate": 0.7143,
+        "avg_rounds_to_full_recall": 1.0
+      },
+      "Null": {
+        "num_samples": 6,
+        "abstain": 1.0,
+        "docs_total": 53.8333,
+        "docs_unique": 23.0,
+        "evidence_count": 0.0,
+        "has_error": 0.0,
+        "num_calls": 5.3333,
+        "num_queries": 16.6667,
+        "num_rounds": 3.6667,
+        "redundant_calls": 0.5,
+        "full_recall_rate": 0.0,
+        "avg_rounds_to_full_recall": null
+      },
+      "Single": {
+        "num_samples": 51,
+        "abstain": 0.2157,
+        "cumulative_recall": 0.8824,
+        "docs_total": 29.4118,
+        "docs_unique": 15.9412,
+        "evidence_count": 1.0,
+        "first_round_recall": 0.7843,
+        "has_error": 0.0,
+        "num_calls": 3.098,
+        "num_queries": 8.9216,
+        "num_rounds": 2.2549,
+        "redundant_calls": 0.1961,
+        "rounds_to_full_recall": 1.3111,
+        "full_recall_rate": 0.8824,
+        "avg_rounds_to_full_recall": 1.3111
+      }
+    }
+  },
+  "judge": {
+    "num_judged": 64,
+    "num_failed": 0,
+    "dimensions": {
+      "query_quality": {
+        "mean": 3.7344,
+        "n": 64,
+        "dist": {
+          "2": 6,
+          "3": 13,
+          "4": 37,
+          "5": 8
+        }
+      },
+      "retrieval_efficiency": {
+        "mean": 3.0,
+        "n": 64,
+        "dist": {
+          "1": 5,
+          "2": 22,
+          "3": 10,
+          "4": 22,
+          "5": 5
+        }
+      },
+      "evidence_recall": {
+        "mean": 4.5312,
+        "n": 64,
+        "dist": {
+          "1": 5,
+          "2": 2,
+          "3": 1,
+          "4": 2,
+          "5": 54
+        }
+      },
+      "answer_correctness": {
+        "mean": 3.8438,
+        "n": 64,
+        "dist": {
+          "1": 16,
+          "2": 2,
+          "3": 1,
+          "4": 2,
+          "5": 43
+        }
+      },
+      "groundedness": {
+        "mean": 4.2344,
+        "n": 64,
+        "dist": {
+          "1": 5,
+          "2": 6,
+          "3": 1,
+          "4": 9,
+          "5": 43
+        }
+      }
+    },
+    "overall_mean": 3.8688
+  },
+  "config": {
+    "collection": "lihua",
+    "mcp_url": "http://127.0.0.1:9000/mcp",
+    "mode": "agent",
+    "max_rounds": 4,
+    "top_k": 5,
+    "doc_chars": 1000,
+    "judge": true,
+    "judge_doc_chars": 500,
+    "concurrency": 8,
+    "limit": null,
+    "qids": null,
+    "types": null,
+    "output": "lihua_agent_sample01",
+    "sample_ratio": 0.1,
+    "sample_seed": 42,
+    "dataset": "lihua"
+  }
+}

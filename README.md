@@ -9,6 +9,7 @@
 - `conf/conf.yaml` - 服务配置
 - `engine/` - 核心业务逻辑：知识库、记忆库、管道、chunker
 - `eval/` - 评测与数据集导入工具
+  - `eval/lihua/` - LiHua-World 长上下文多跳检索端到端评测（评测框架 + 结果；数据集为公开语料不入库，见下方说明）
 - `vector_store/qdrant.py` - Qdrant 封装
 - `scripts/run.sh` - 统一启动/停止/状态管理脚本
 - `data/` - 评测结果与生成文件输出目录
@@ -143,6 +144,67 @@ PYTHONPATH=.. python -m rag.eval plot data/<report1>.json data/<report2>.json ..
 ![SciFact 检索对比](assets/scifact_scifact_dense_no_rerank_20260729_223327_cmp.png)
 
 > 小结：rerank 明显提升 precision 类指标（NDCG@1 / MAP@1）；hybrid 在召回率（Recall@10 / Recall@100）上优于纯 dense。
+
+### 评测结果（LiHua-World 端到端评测，Agent 多轮检索）
+
+除单次检索的 BEIR 式评测外，项目还实现了 **LLM-Agent 驱动的端到端检索评测**（`eval/lihua/`），验证"LLM 自主规划查询 → 调用 RAG MCP 工具 → 多轮收敛 → 生成答案"的完整链路。
+
+**评测场景（LiHua-World）**：基于公开 [LiHua-World](https://github.com/HKUDS/MiniRAG/tree/main/dataset/LiHua-World) 数据集的**长上下文时序型**检索场景——442 段通讯对话覆盖 52 周时间线（含业务往来、生活备忘等多主题），问题需跨会话、跨时间定位证据。query_set 全量 637 题按证据类型分布：
+
+| 类型 | 题数 | 说明 |
+| --- | ---: | --- |
+| Single | 506 | 证据在同一段会话内 |
+| Multi | 66 | 需跨多段会话拼接证据 |
+| Null | 65 | 知识库无答案，应拒答 |
+
+> 数据集为公开语料（[HKUDS/MiniRAG](https://github.com/HKUDS/MiniRAG)，ACL 2026），不随仓库分发。运行评测前请将 `processed.jsonl`、`query_set.json` 及会话 txt 放置到 `eval/lihua/dataset/`（含 `week*/` 等子目录），目录结构见 `eval/lihua/dataset.py` 顶部说明。
+
+**评测方式**：Agent 模式由 LLM 自主决定查询策略（改写/拆解/追问）并循环调用 MCP `search` 工具，证据覆盖后自行收敛输出答案，再由 LLM 从五个维度打 1-5 分；Direct 模式为对照基线（问题原样单次检索 top-5，不产答案）。**本次评测仅跑 query_set 全量 637 题的 1/10 抽样子集（seed=42、ratio=0.1，共 64 题）**，agent 与基线用**同一 64 题子集**保证可比；以下 Agent 结果均基于该 1/10 子集，不代表全量结论。
+
+**运行命令**（项目根目录下，需先启动服务）：
+
+```bash
+source .venv/bin/activate
+# Agent 多轮检索评测（可 --qids 0,1.. / --types Multi / --max-rounds 调整）
+PYTHONPATH=.. python -m rag.eval.lihua -c lihua --mode agent \
+  --sample-ratio 0.1 --sample-seed 42 --output lihua_agent_sample01
+# Direct 基线（同题集对照）
+PYTHONPATH=.. python -m rag.eval.lihua -c lihua --mode direct \
+  --top-k 5 --output lihua_direct_top5
+```
+
+**检索结果（Agent vs Direct 基线，同一 64 题子集 = query_set 全量的 1/10）**：
+
+| 指标 | Direct（单轮 top-5） | Agent（多轮） |
+| --- | ---: | ---: |
+| 证据累积召回率 | 76.72% | **88.36%** |
+| 首轮召回率 | 76.72% | 79.31% |
+| 全题证据召齐全率（full recall rate） | 65.62% | **78.12%** |
+| 平均检索轮次 | 1.0 | 2.34 |
+| 平均查询数 | 1.0 | 9.69 |
+| 冗余调用/题 | 0 | 0.20 |
+| 错误率 | 0% | 0% |
+
+Agent 通过多轮检索把证据累积召回率从基线的 76.7% 提升到 **88.4%（+11.7pp）**，全题召齐全率提升 **12.5pp**；平均仅需 2.3 轮即收敛，冗余调用接近 0。（以上均为 1/10 抽样子集 64 题上的结果）
+
+**LLM 五维裁判评分（1-5，Agent 模式，1/10 子集 64 题）**：
+
+| 维度 | 均分 |
+| --- | ---: |
+| answer_correctness（答案正确性） | 3.84 |
+| evidence_recall（证据覆盖） | 4.53 |
+| groundedness（回答有据性） | 4.23 |
+| query_quality（查询质量） | 3.73 |
+| retrieval_efficiency（检索效率） | 3.00 |
+| **overall mean** | **3.87** |
+
+**拒答（abstention，1/10 子集 64 题内）**：整体 abstain 率 29.7%，其中 Null 类（知识库无答案）问题全部正确拒答，可有效降低幻觉风险。
+
+原始轨迹与报告见 `eval/lihua/results/`：
+
+- `lihua_agent_sample01_report.json` / `.jsonl` — Agent 1/10 抽样 64 题评测报告与逐题轨迹
+- `lihua_direct_top5_report.json` — Direct 全量 637 题基线报告（非 1/10 抽样，仅作语料整体基线参考）
+- `lihua_direct_top5_sample01_agg.json` — 同 1/10 子集（64 题）Direct 对照聚合，用于与 Agent 逐项对比
 
 ## 运行环境
 
