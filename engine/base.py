@@ -8,6 +8,7 @@ from ..core import (
     AppError,
     CollectionBriefInfo,
     CollectionInfo,
+    Document,
     ErrorCode,
     FilterRule,
     SearchResult,
@@ -70,11 +71,13 @@ class Collection:
     async def encode(self, texts: list[Text]):
         return await self._embed.encode([t.content for t in texts], self.hybrid)
 
-    async def insert(self, texts: list[Text], dup_threshold: float | None = None):
+    async def insert(self, texts: list[Document], dup_threshold: float | None = None):
         payloads = [text.model_dump() for text in texts]
         ids = [text.hash_id for text in texts]
 
-        dense_vectors, sparse_vectors = await self.encode(texts)
+        dense_vectors, sparse_vectors = await self._embed.encode(
+            [t.content for t in texts], self.hybrid
+        )
 
         await self._store.insert(
             payloads, ids, dense_vectors, sparse_vectors, dup_threshold
@@ -107,11 +110,11 @@ class Collection:
         # 先解析全部结果。多查询的原始分数跨 query 不可比，扁平化去重后
         # 无法区分分数来自哪个 query，故不对外暴露 score 字段。
         all_results = [
-            [Text.model_validate(p.payload) for p in points_list[i]]
+            [Document.model_validate(p.payload) for p in points_list[i]]
             for i in range(len(queries))
         ]
 
-        # batch rerank 全部 query，一次网络调用。rerank 分数仅用于组内排序，
+        # batch rerank 全部 query，一次网络调用。rerank 分数仅用于组内排序。
         if do_rerank:
             texts = [[t.content for t in results] for results in all_results]
             scores = await self._rerank.rerank(queries, texts)

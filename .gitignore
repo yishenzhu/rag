@@ -4,6 +4,7 @@ data/
 *.venv/
 models/
 .vscode
+.commandcode/
 .env
 # 公开数据集：不随仓库分发，运行前需自行放置
 eval/lihua/dataset/

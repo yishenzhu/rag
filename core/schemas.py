@@ -2,9 +2,9 @@ import hashlib
 import json
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, TypeAlias
+from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ErrorCode(StrEnum):
@@ -19,6 +19,7 @@ class AppError(Exception):
 
 
 class Text(BaseModel):
+    type: Literal["text"] = "text"
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -30,7 +31,35 @@ class Text(BaseModel):
         return hashlib.md5(payload.encode()).hexdigest()
 
 
-Document: TypeAlias = Text
+class Image(BaseModel):
+    """与 Text 平级的图片内容单元。url 与 base64 必须且仅有一个非 None（对外接口不接受本地 path）。"""
+
+    type: Literal["image"] = "image"
+    url: str | None = Field(default=None, description="http(s) 图片 URL")
+    base64: str | None = Field(
+        default=None,
+        description="内联图片 data URI（data:image/...;base64,...，由入库方保证格式）",
+    )
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_source(self):
+        if (self.url is None) == (self.base64 is None):
+            raise ValueError("url 与 base64 必须且仅有一个非 None")
+        return self
+
+    @property
+    def hash_id(self):
+        payload = json.dumps(self.model_dump(), sort_keys=True, ensure_ascii=False)
+        return hashlib.md5(payload.encode()).hexdigest()
+
+    @property
+    def content(self) -> str:
+        """统一内容访问器：返回图片的模型输入串（url 或 data URI base64）。"""
+        return self.url or self.base64
+
+
+Document: TypeAlias = Annotated[Text | Image, Field(discriminator="type")]
 Chunk: TypeAlias = Text
 Memory: TypeAlias = Text
 
