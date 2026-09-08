@@ -8,7 +8,6 @@
 import argparse
 import logging
 import time
-from os.path import abspath
 
 import numpy as np
 import torch
@@ -38,13 +37,6 @@ class EmbedResponse(BaseModel):
 
 class DimsResponse(BaseModel):
     dims: int
-
-
-def image_ref(value: str) -> str:
-    """http(s)/oss URL 原样透传；其余视为服务端本机路径，转 file:// 绝对路径。"""
-    if value.startswith(("http://", "https://", "oss://")):
-        return value
-    return "file://" + abspath(value)
 
 
 # ── 服务主体 ────────────────────────────────────────────────────
@@ -130,12 +122,22 @@ def qwen_vl_app(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    logger.info("Loading multimodal embedding model: %s on %s", model_name, device)
+    logger.info(
+        "Loading multimodal embedding model: %s on %s (int8)", model_name, device
+    )
     t0 = time.perf_counter()
     from sentence_transformers import SentenceTransformer
+    from transformers import BitsAndBytesConfig
 
+    # 8bit 量化加载：权重显存占用减半，需 device_map 由 bnb 管理设备
     model = SentenceTransformer(
-        model_name, trust_remote_code=True, device=device
+        model_name,
+        trust_remote_code=True,
+        device=device,
+        model_kwargs={
+            "quantization_config": BitsAndBytesConfig(load_in_8bit=True),
+            "device_map": {"": device},
+        },
     )
     # 用一次空文本前向探测输出维度（2048），同时触发权重加载
     probe = model.encode([""])
@@ -153,7 +155,7 @@ def qwen_vl_app(
 
         inputs: list[str | dict] = []
         inputs.extend(req.texts)  # 纯文本 str
-        inputs.extend({"image": image_ref(v)} for v in req.images)
+        inputs.extend({"image": v} for v in req.images)
 
         embeddings = await run_in_threadpool(
             model.encode, inputs, batch_size=batch_size, normalize_embeddings=True
@@ -187,13 +189,10 @@ def qwen_vl_app(
 
 def main():
     parser = argparse.ArgumentParser(description="Embedding 微服务")
-    parser.add_argument("--model", default="BAAI/bge-m3")
-    parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8002)
-    parser.add_argument("--device", default=None, help="cuda / cpu，默认自动检测")
     parser.add_argument(
-        "--multimodal", action="store_true", help="强制以多模态（Qwen3-VL-Embedding）模式加载"
+        "--conf",
+        default="conf/conf.yaml",
+        help="配置文件路径（默认 conf/conf.yaml），读取顶层 embedding 配置",
     )
     args = parser.parse_args()
 
@@ -201,8 +200,12 @@ def main():
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
-    app = create_app(args.model, args.batch_size, args.device, args.multimodal)
-    uvicorn.run(app, host=args.host, port=args.port)
+
+    from ..core import Config
+
+    cfg = Config.load(args.conf).embedding
+    app = create_app(cfg.model, cfg.batch_size, multimodal=cfg.multimodal)
+    uvicorn.run(app, host=cfg.host, port=cfg.port)
 
 
 if __name__ == "__main__":

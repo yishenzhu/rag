@@ -61,10 +61,10 @@ start_embedding() {
         log_info "Embedding 服务已在运行"
         return
     fi
-    log_info "启动 Embedding 服务 (端口 8002) ..."
-    nohup python -m rag.embedding.server --model models/bge-m3 \
+    log_info "启动 Embedding 服务（配置见 conf/conf.yaml embedding）..."
+    nohup python -m rag.embedding.server --conf conf/conf.yaml \
         > "$ROOT_DIR/logs/embedding.log" 2>&1 &
-    log_info "Embedding 启动中，请稍候（模型加载约需 10-30 秒）"
+    log_info "Embedding 启动中，请稍候（模型加载约需 30-60 秒）"
 }
 
 start_rerank() {
@@ -72,8 +72,8 @@ start_rerank() {
         log_info "Rerank 服务已在运行"
         return
     fi
-    log_info "启动 Rerank 服务 (端口 8003) ..."
-    nohup python -m rag.rerank.server --model models/ms-marco-MiniLM-L6-v2 \
+    log_info "启动 Rerank 服务（配置见 conf/conf.yaml rerank）..."
+    nohup python -m rag.rerank.server --conf conf/conf.yaml \
         > "$ROOT_DIR/logs/rerank.log" 2>&1 &
     log_info "Rerank 启动中，请稍候（模型加载约需 10-30 秒）"
 }
@@ -101,7 +101,7 @@ cmd_start() {
             start_embedding
             start_rerank
             echo -n "等待模型加载"
-            for i in $(seq 1 30); do
+            for i in $(seq 1 90); do
                 if curl -sf http://localhost:8002/health >/dev/null 2>&1 &&
                    curl -sf http://localhost:8003/health >/dev/null 2>&1; then
                     echo ""
@@ -129,7 +129,7 @@ cmd_start() {
             start_embedding
             start_rerank
             echo -n "等待模型加载"
-            for i in $(seq 1 30); do
+            for i in $(seq 1 90); do
                 if curl -sf http://localhost:8002/health >/dev/null 2>&1 &&
                    curl -sf http://localhost:8003/health >/dev/null 2>&1; then
                     echo ""
@@ -174,8 +174,8 @@ cmd_status() {
     fi
 
     # 其余服务
-    for s in "Embedding|embedding|8002" \
-             "Rerank|rerank|8003" \
+    for s in "Embedding|rag.embedding.server|8002" \
+             "Rerank|rag.rerank.server|8003" \
              "API|rag.main|8001" \
              "MCP|rag.mcp_svr|9000"; do
         IFS='|' read -r name cmd port <<< "$s"

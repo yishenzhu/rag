@@ -71,20 +71,21 @@ def create_app(
 def main():
     parser = argparse.ArgumentParser(description="Rerank 微服务")
     parser.add_argument(
-        "--model", default="cross-encoder/ms-marco-MiniLM-L6-v2"
+        "--conf", default="conf/conf.yaml", help="配置文件路径（默认 conf/conf.yaml），读取顶层 rerank 配置"
     )
-    parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8003)
-    parser.add_argument("--device", default=None, help="cuda / cpu，默认自动检测")
     args = parser.parse_args()
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
-    app = create_app(args.model, args.batch_size, args.device)
-    uvicorn.run(app, host=args.host, port=args.port)
+
+    from ..core import Config
+
+    cfg = Config.load(args.conf).rerank
+    # device 不配置：有 GPU 用 GPU，否则 CPU
+    app = create_app(cfg.model, cfg.batch_size)
+    uvicorn.run(app, host=cfg.host, port=cfg.port)
 
 
 if __name__ == "__main__":

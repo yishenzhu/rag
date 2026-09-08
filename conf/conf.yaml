@@ -2,23 +2,34 @@ app:
   host: "0.0.0.0"
   port: 8001
 
-rag:
+# ── rag 应用连接配置（供 API/MCP 的 Pipeline 使用） ─────────────
+# embedding/rerank 端点锚点：本机服务，host/port 顶层模型服务也引用
 
+rag:
   qdrant:
     host: "localhost"
     port: 6333
-    
-  embedding:
-    model: "BAAI/bge-m3"
-    batch_size: 128
-    server: "http://localhost:8002"
 
-  rerank:
-    model: "cross-encoder/ms-marco-MiniLM-L6-v2"
-    batch_size: 256
-    server: "http://localhost:8003"
-    # model: "BAAI/bge-reranker-v2-m3"
-    # batch_size: 32
+  embedding: &embedding_endpoint
+    host: "localhost"
+    port: 8002
+
+  rerank: &rerank_endpoint
+    host: "localhost"
+    port: 8003
+
+# ── 模型服务启动配置（merge 引用 rag 下端点） ───────────────────
+
+embedding:
+  <<: *embedding_endpoint
+  model: "models/Qwen3-VL-Embedding-2B"
+  batch_size: 32
+  multimodal: true        # 多模态（Qwen3-VL-Embedding，int8 量化）；false 走 BGE-M3
+
+rerank:
+  <<: *rerank_endpoint
+  model: "cross-encoder/ms-marco-MiniLM-L6-v2"
+  batch_size: 256
 
 log:
   level: "DEBUG"

@@ -1,7 +1,8 @@
-from pydantic import BaseModel
-import yaml
-from pathlib import Path
 import logging
+from pathlib import Path
+
+import yaml
+from pydantic import BaseModel
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -18,16 +19,39 @@ class ServerConfig(BaseModel):
     port: int = 8001
 
 
+# ── 顶层模型服务配置（供模型服务进程启动） ───────────────────
+
+
 class EmbeddingConfig(BaseModel):
+    """embedding 服务进程启动配置（conf.yaml 顶层 embedding 块）。
+    device 不配置：有 GPU 用 GPU，否则 CPU。"""
+
     model: str = "BAAI/bge-m3"
     batch_size: int = 32
-    server: str = "http://localhost:8002"
+    host: str = "0.0.0.0"
+    port: int = 8002
+    multimodal: bool = False
 
 
 class RerankConfig(BaseModel):
     model: str = "BAAI/bge-reranker-v2-m3"
     batch_size: int = 32
-    server: str = "http://localhost:8003"
+    host: str = "0.0.0.0"
+    port: int = 8003
+
+
+# ── rag 块（应用连接配置，供 Pipeline 用） ─────────────────────
+
+
+class EndpointRef(BaseModel):
+    """客户端连接端点：host + port（与 qdrant 同构），server 为派生完整地址。"""
+
+    host: str
+    port: int
+
+    @property
+    def server(self) -> str:
+        return f"http://{self.host}:{self.port}"
 
 
 class VectorStoreConfig(BaseModel):
@@ -37,8 +61,8 @@ class VectorStoreConfig(BaseModel):
 
 class RAGConfig(BaseModel):
     qdrant: VectorStoreConfig
-    embedding: EmbeddingConfig
-    rerank: RerankConfig
+    embedding: EndpointRef
+    rerank: EndpointRef
 
 
 class LogConfig(BaseModel):
@@ -53,6 +77,8 @@ class LogConfig(BaseModel):
 
 class Config(BaseModel):
     app: ServerConfig
+    embedding: EmbeddingConfig
+    rerank: RerankConfig
     rag: RAGConfig
     log: LogConfig
     mcp: ServerConfig
