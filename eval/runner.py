@@ -1,21 +1,24 @@
-"""EvalRunner：纯评测流程（不负责 ingest，不负责绘图）。"""
+"""EvalRunner：纯评测流程（不负责 ingest，不负责绘图）。
+
+通过注入 EvalDataset + Metric 适配器，与具体数据源/指标解耦。
+必须显式传入数据集对象与指标对象，不绑定任何具体数据源。
+"""
 
 import json
 import logging
-from datetime import datetime
 from pathlib import Path
+from datetime import datetime
 
 import httpx
-from beir.retrieval.evaluation import EvaluateRetrieval
 
 from ..core import Config, SearchType, auto_path, setup_logger
-from .datasets import load_dataset
+from .base import EvalDataset, Metric
 
 logger = logging.getLogger(__name__)
 
 
 class EvalRunner:
-    """BEIR 评测运行器。假定 collection 已存在并已导入数据。
+    """通用评测运行器。假定 collection 已存在并已导入数据。
 
     在单个 collection 上跑全部 4 种检索组合；只输出 JSON 报告，绘图由 plotting.py 单独完成。
     """
@@ -30,23 +33,25 @@ class EvalRunner:
 
     def __init__(
         self,
-        dataset_name: str,
+        dataset: EvalDataset,
+        metric: Metric,
         collection: str = "eval",
         threshold: float = 0.0,
         host: str = "http://localhost:8001",
     ):
-        self._dataset_name = dataset_name
+        self._dataset = dataset
+        self._metric = metric
         self._collection = collection
         self._threshold = threshold
         self._host = host.rstrip("/")
-        self._corpus: list | None = None
-        self._queries: list | None = None
-        self._qrels: dict | None = None
+        self._corpus: list = []
+        self._queries: list[dict] = []
+        self._qrels: dict = {}
 
     # ── 加载 ──────────────────────────────────────────────
 
     async def setup(self):
-        self._corpus, self._queries, self._qrels = load_dataset(self._dataset_name)
+        self._corpus, self._queries, self._qrels = self._dataset.load()
         logger.info(
             "Dataset loaded: %d corpus, %d queries, %d qrels",
             len(self._corpus),
@@ -75,7 +80,7 @@ class EvalRunner:
         metrics = await self._evaluate(collection, search_type, rerank)
 
         report = {
-            "dataset": self._dataset_name,
+            "dataset": self._dataset.name,
             "collection": collection,
             "search_type": search_type.value,
             "rerank": rerank,
@@ -140,19 +145,17 @@ class EvalRunner:
                         raise RuntimeError(f"Search failed: {data}")
 
                     hits = data.get("results", [])
-
+                    # 检索结果已按相关性降序，而 pytrec_eval 按值降序取序，
+                    # 故用递减分数表达名次（第 1 名分最高）；无 doc_id 的命中跳过。
+                    n = len(hits)
                     results[qid] = {
-                        r["payload"]["metadata"].get("doc_id"): rank
+                        r["payload"]["metadata"].get("doc_id"): n - rank
                         for rank, r in enumerate(hits)
+                        if r["payload"]["metadata"].get("doc_id")
                     }
 
-                ndcg, _map, recall, precision = EvaluateRetrieval.evaluate(
-                    self._qrels, results, [k]
-                )
-                mrr = EvaluateRetrieval.evaluate_custom(
-                    self._qrels, results, [k], metric="mrr"
-                )
-                metrics.update({**ndcg, **_map, **recall, **precision, **mrr})
+                # 指标计算交给注入的 Metric 适配器
+                metrics.update(self._metric.evaluate(self._qrels, results, [k]))
         return metrics
 
     def _save_json(
@@ -160,7 +163,7 @@ class EvalRunner:
     ) -> str:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         name = (
-            f"{self._dataset_name}_{collection}_{search_type.value}_"
+            f"{self._dataset.name}_{collection}_{search_type.value}_"
             f"{'rerank' if rerank else 'no_rerank'}_{ts}"
         )
         path = auto_path(f"data/{name}.json")

@@ -9,7 +9,7 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from .datasets import BEIR_DATASETS
+from .beir import BEIR_DATASETS, BEIRDataset, BEIRMetric
 from .runner import EvalRunner
 from .plotting import plot
 
@@ -34,7 +34,13 @@ def main():
 
     if args.command == "eval":
         async def _run():
-            runner = EvalRunner(args.dataset_name, args.collection, args.threshold, args.host)
+            runner = EvalRunner(
+                BEIRDataset(args.dataset_name),
+                BEIRMetric(),
+                collection=args.collection,
+                threshold=args.threshold,
+                host=args.host,
+            )
             await runner.setup()
             _, paths = await runner.run_all()
 

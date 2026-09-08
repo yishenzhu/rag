@@ -1,9 +1,9 @@
 """RAG 评测模块。
 
 Usage:
-    from rag.eval import EvalRunner
+    from rag.eval import EvalRunner, BEIRDataset, BEIRMetric
 
-    runner = EvalRunner("nfcorpus", "eval")
+    runner = EvalRunner(BEIRDataset("nfcorpus"), BEIRMetric(), collection="eval")
     await runner.setup()
     await runner.run_all()
 """
@@ -15,10 +15,12 @@ import os
 # 运行时再改 os.environ 无效。需要联网(首次)下载数据集/模型时，用 HF_HUB_OFFLINE=0 运行。
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
-from .datasets import load_dataset, BEIR_DATASETS
+from .beir import BEIR_DATASETS, BEIRDataset, BEIRMetric
 from .runner import EvalRunner
 
 __all__ = [
+    "BEIRDataset",
+    "BEIRMetric",
+    "BEIR_DATASETS",
     "EvalRunner",
-    "load_dataset", "BEIR_DATASETS",
 ]

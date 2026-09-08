@@ -15,7 +15,7 @@ import httpx
 
 from ..engine import DocumentLoader
 from ..core import Document
-from .datasets import load_corpus
+from .beir import BEIRDataset
 
 
 def main():
@@ -88,15 +88,11 @@ def main():
 def _load_dataset_corpus(dataset_name: str) -> list[Document]:
     """加载 BEIR 数据集语料，转为 Document 列表（content=title+text，metadata 带 doc_id）。"""
     try:
-        corpus = load_corpus(dataset_name)
+        return BEIRDataset(dataset_name).load_corpus()
     except Exception as e:
         print(f"[错误] 加载数据集 {dataset_name} 失败: {e}", file=sys.stderr)
         print("[提示] 若数据集未缓存，请用 HF_HUB_OFFLINE=0 重新运行以下载", file=sys.stderr)
         sys.exit(1)
-    return [
-        Document(content=f"{row['title']}\n{row['text']}", metadata={"doc_id": row["id"]})
-        for row in corpus
-    ]
 
 
 def _ensure_collection(host: str, name: str):
