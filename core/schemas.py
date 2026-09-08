@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
 
 class ErrorCode(StrEnum):
@@ -57,6 +57,7 @@ class Image(BaseModel):
 
 
 Document: TypeAlias = Annotated[Text | Image, Field(discriminator="type")]
+DocumentAdapter = TypeAdapter(Document)
 Chunk: TypeAlias = Text
 Memory: TypeAlias = Text
 
@@ -136,7 +137,7 @@ class FilterRule(BaseModel):
 
 
 class SearchResult(BaseModel):
-    payload: Text
+    payload: Document
 
 
 class SearchReq(BaseModel):

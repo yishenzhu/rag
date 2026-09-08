@@ -9,8 +9,10 @@ from ..core import (
     CollectionBriefInfo,
     CollectionInfo,
     Document,
+    DocumentAdapter,
     ErrorCode,
     FilterRule,
+    Image,
     SearchResult,
     SearchType,
     Text,
@@ -68,16 +70,30 @@ class Collection:
         self._info = info
         return self
 
-    async def encode(self, texts: list[Text]):
-        return await self._embed.encode([t.content for t in texts], self.hybrid)
-
-    async def insert(self, texts: list[Document], dup_threshold: float | None = None):
-        payloads = [text.model_dump() for text in texts]
-        ids = [text.hash_id for text in texts]
-
-        dense_vectors, sparse_vectors = await self._embed.encode(
-            [t.content for t in texts], self.hybrid
+    async def encode(self, docs: list[Document]):
+        """编码文档，返回 (dense, sparse)。dense 行序 = 文本文档在前、图片文档在后。"""
+        text_docs, image_docs = self._split_docs(docs)
+        return await self._embed.encode(
+            [d.content for d in text_docs],
+            [d.content for d in image_docs],
+            hybrid=self.hybrid,
         )
+
+    @staticmethod
+    def _split_docs(docs: list[Document]) -> tuple[list[Text], list[Image]]:
+        """按 Text/Image 分流，保持各组内部原序。"""
+        texts = [d for d in docs if isinstance(d, Text)]
+        images = [d for d in docs if isinstance(d, Image)]
+        return texts, images
+
+    async def insert(self, docs: list[Document], dup_threshold: float | None = None):
+        # 编码行序 = 文本文档在前、图片文档在后，payload/vector 需同序对齐
+        text_docs, image_docs = self._split_docs(docs)
+        ordered = text_docs + image_docs
+        payloads = [d.model_dump() for d in ordered]
+        ids = [d.hash_id for d in ordered]
+
+        dense_vectors, sparse_vectors = await self.encode(docs)
 
         await self._store.insert(
             payloads, ids, dense_vectors, sparse_vectors, dup_threshold
@@ -96,7 +112,7 @@ class Collection:
         hybrid = search_type == SearchType.HYBRID and self.hybrid
         do_rerank = rerank and self._rerank is not None
 
-        dense_vectors, sparse_vectors = await self._embed.encode(queries, hybrid)
+        dense_vectors, sparse_vectors = await self._embed.encode(queries, hybrid=hybrid)
 
         # 一次 batch 检索全部 query，返回 per-query 结果
         points_list = await self._store.query(
@@ -110,7 +126,7 @@ class Collection:
         # 先解析全部结果。多查询的原始分数跨 query 不可比，扁平化去重后
         # 无法区分分数来自哪个 query，故不对外暴露 score 字段。
         all_results = [
-            [Document.model_validate(p.payload) for p in points_list[i]]
+            [DocumentAdapter.validate_python(p.payload) for p in points_list[i]]
             for i in range(len(queries))
         ]
 
@@ -118,19 +134,10 @@ class Collection:
         # 候选按类型分组：文本进 texts、图片（Image.content 即 url/path）进 images，
         # 组内重排为「文本在前、图片在后」以与后端返回的分数顺序对齐。
         if do_rerank:
-            group_texts: list[list[str]] = []
-            group_images: list[list[str]] = []
-            group_docs: list[list[Document]] = []
-            for results in all_results:
-                text_docs, image_docs = [], []
-                for t in results:
-                    if isinstance(t, Text):
-                        text_docs.append(t)
-                    else:
-                        image_docs.append(t)
-                group_texts.append([t.content for t in text_docs])
-                group_images.append([t.content for t in image_docs])
-                group_docs.append(text_docs + image_docs)
+            splits = [self._split_docs(results) for results in all_results]
+            group_texts = [[d.content for d in t] for t, _ in splits]
+            group_images = [[d.content for d in i] for _, i in splits]
+            group_docs = [t + i for t, i in splits]
 
             scores = await self._rerank.rerank(queries, group_texts, group_images)
             for i in range(len(queries)):
