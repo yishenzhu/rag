@@ -2,7 +2,7 @@ import re
 
 import numpy as np
 
-from ..core import Chunk, Document
+from ..core import Chunk, Document, Text
 
 
 class RecursiveChunker:
@@ -17,7 +17,7 @@ class RecursiveChunker:
     def split(self, doc: Document) -> list[Chunk]:
         seprators = ["\n\n", "\n", "。", ".", " "]
         parts = self._recursive_split(doc.content, seprators)
-        return _build_chunks(parts, doc)
+        return [Chunk(content=p, metadata=doc.metadata.copy()) for p in parts]
 
     def _recursive_split(self, text: str, seprators: list[str]) -> list[str]:
         if len(text) <= self._chunk_size:
@@ -82,14 +82,18 @@ class SemanticChunker:
     async def split(self, doc: Document) -> list[Chunk]:
         sentences = self._split_sentences(doc.content)
         if len(sentences) <= 1:
-            return self._build_chunks([doc.content], doc)
+            return [Chunk(content=doc.content, metadata=doc.metadata.copy())]
 
         # 批量编码
         dense, _ = await self._embed.encode(sentences)
 
-        # 相邻句子相似度
+        # 相邻句子余弦相似度；范数为 0 的向量视为无关联
+        def cosine(a: np.ndarray, b: np.ndarray) -> float:
+            norm = float(np.linalg.norm(a)) * float(np.linalg.norm(b))
+            return float(np.dot(a, b)) / norm if norm > 0 else 0.0
+
         sims = np.array(
-            [_cosine_sim(dense[i], dense[i + 1]) for i in range(len(sentences) - 1)]
+            [cosine(dense[i], dense[i + 1]) for i in range(len(sentences) - 1)]
         )
 
         # 动态阈值：低于分位数的位置就是断点
@@ -97,7 +101,7 @@ class SemanticChunker:
 
         # 按断点合并句子
         merged = self._merge_sentences(sentences, sims, threshold)
-        return self._build_chunks(merged, doc)
+        return [Chunk(content=p, metadata=doc.metadata.copy()) for p in merged]
 
     # ── 内部方法 ────────────────────────────────────────────
 
@@ -129,9 +133,6 @@ class SemanticChunker:
         if current:
             chunks.append(current)
         return chunks
-
-    def _build_chunks(self, parts: list[str], doc: Document) -> list[Chunk]:
-        return _build_chunks(parts, doc)
 
 
 class MarkdownChunker:
@@ -196,7 +197,7 @@ class MarkdownChunker:
             return [self._make_chunk(section["content"], doc, section["header_chain"])]
         fallback = RecursiveChunker(self._chunk_size, self._chunk_overlap)
         # 只切正文本身，标题已进 metadata 的 headers，不重复进正文
-        targets = fallback.split(Document(content=section["content"]))
+        targets = fallback.split(Text(content=section["content"]))
         parts = [t.content for t in targets]
         return [self._make_chunk(p, doc, section["header_chain"]) for p in parts]
 
@@ -290,16 +291,3 @@ class MarkdownChunker:
         if header_chain:
             meta["headers"] = list(header_chain)
         return Chunk(content=content, metadata=meta)
-
-
-# ── 共享工具 ───────────────────────────────────────────────
-
-
-def _build_chunks(parts: list[str], doc: Document) -> list[Chunk]:
-    return [Chunk(content=part, metadata=doc.metadata.copy()) for part in parts]
-
-
-def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
-    dot = float(np.dot(a, b))
-    norm = float(np.linalg.norm(a)) * float(np.linalg.norm(b))
-    return dot / norm if norm > 0 else 0.0

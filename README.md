@@ -1,6 +1,6 @@
 # RAG Service
 
-基于 FastAPI 的 RAG（Retrieval-Augmented Generation）服务，包含知识库（KnowledgeBase）和记忆库（MemoryBank）两种向量存储。项目支持 Qdrant 向量库、Embedding 服务、Rerank 服务及 BEIR 数据集评测。
+基于 FastAPI 的 RAG（Retrieval-Augmented Generation）服务，包含知识库（KnowledgeBase）和记忆库（MemoryBank）两种向量存储。项目支持 Qdrant 向量库、Embedding 服务、Rerank 服务及 BEIR 数据集评测。Embedding 与 Rerank 均支持多模态（文本 + 图片统一向量空间）。
 
 ## 目录结构
 
@@ -8,7 +8,11 @@
 - `mcp_svr.py` - 启动 MCP Server
 - `conf/conf.yaml` - 服务配置
 - `engine/` - 核心业务逻辑：知识库、记忆库、管道、chunker
+- `embedding/` - 多模态嵌入微服务（Qwen3-VL-Embedding / BGE-M3）
+- `rerank/` - 多模态重排微服务（Qwen3-VL-Reranker）
 - `eval/` - 评测与数据集导入工具
+  - `eval/base.py` - 评测抽象：`EvalDataset` / `Metric` 协议
+  - `eval/beir/` - BEIR 数据集与指标适配器
   - `eval/lihua/` - LiHua-World 长上下文多跳检索端到端评测（评测框架 + 结果；数据集为公开语料不入库，见下方说明）
 - `vector_store/qdrant.py` - Qdrant 封装
 - `scripts/run.sh` - 统一启动/停止/状态管理脚本
@@ -27,7 +31,7 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-> 项目依赖定义在 `pyproject.toml`，包括 `fastapi`、`qdrant-client`、`httpx`、`beir`、`matplotlib` 等。
+> 项目依赖定义在 `pyproject.toml`，包括 `fastapi`、`qdrant-client`、`httpx`、`beir`、`matplotlib`，以及多模态所需的 `transformers`、`accelerate`、`bitsandbytes`。
 
 ### 2. 启动服务
 
@@ -62,6 +66,8 @@ curl -X POST http://localhost:8001/knowledge \
   -H "Content-Type: application/json" \
   -d '{"name":"scifact","enabled":true,"hybrid":true}'
 ```
+
+> `hybrid` 需要 embedding 后端产出稀疏向量（BGE-M3）。当前默认的 Qwen3-VL 多模态后端不产稀疏向量，`hybrid` 会静默退化为纯 dense；此时该字段填 `true` 或 `false` 效果相同。
 
 - 列出 collection：
 
@@ -101,6 +107,63 @@ curl -X POST http://localhost:8001/knowledge/search \
   }'
 ```
 
+## 多模态
+
+Embedding 与 Rerank 服务均支持文本与图片映射到**同一向量空间**，因此文本查询可以检索图片。开关在 `conf/conf.yaml`：
+
+```yaml
+embedding:
+  model: "models/Qwen3-VL-Embedding-2B"
+  multimodal: true        # true=Qwen3-VL-Embedding（多模态）；false=BGE-M3（纯文本 + 稀疏）
+rerank:
+  model: "models/Qwen3-VL-Reranker-2B"
+  multimodal: true        # true=Qwen3-VL-Reranker（多模态）；false=ms-marco（纯文本）
+```
+
+两个模型均以 **int8 量化**加载，显存占用约为 fp16 的一半。模型文件需预先放在 `models/` 下。
+
+> **注意**：Qwen3-VL-Embedding **不产出稀疏向量**，因此多模态后端下 `hybrid` 会静默退化为纯 dense 检索（不报错）。需要稀疏检索时请把 embedding 切回 `BGE-M3`（`multimodal: false`）。切换模型后向量维度会变化（Qwen3-VL 为 2048，BGE-M3 为 1024），需重建 collection。
+
+### 导入图片
+
+`/knowledge/ingest` 的 `documents` 为多态数组，文本与图片可混在一起：
+
+```bash
+curl -X POST http://localhost:8001/knowledge/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "collection": "mm",
+    "documents": [
+      {"type": "text",  "content": "一只在草地上奔跑的狗", "metadata": {"doc_id": "t1"}},
+      {"type": "image", "url":  "https://example.com/dog.jpg", "metadata": {"doc_id": "i1"}},
+      {"type": "image", "path": "/data/imgs/cat.png", "metadata": {"doc_id": "i2"}}
+    ]
+  }'
+```
+
+- `type` 为判别字段，**必须显式给出**（`"text"` 或 `"image"`）。
+- 图片的 `url` 与 `path` **必须且仅有一个**非空；`path` 为**服务端本机**可读路径。
+- 分块（`chunk_size` / `chunker_type`）**仅作用于文本文档**，图片始终整条入库、不切分。
+
+### 检索（含图片结果）
+
+`queries` 目前为纯文本列表（图片作为**检索结果**返回，暂不支持以图搜图）：
+
+```bash
+curl -X POST http://localhost:8001/knowledge/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "collection": "mm",
+    "queries": ["a dog running on grass"],
+    "top_k": 5,
+    "rerank": true
+  }'
+```
+
+返回的 `payload` 同样是多态对象，图片结果形如 `{"type": "image", "url": "...", "metadata": {...}}`。
+
+多模态 rerank 的分组约定：每个 query 的候选按**文本在前、图片在后**拼接，返回的分数与这个顺序一一对应。
+
 ## 评测
 
 项目基于 [BEIR](https://github.com/beir-cellar/beir) 评测流程。示例（在项目根目录下）：
@@ -129,6 +192,8 @@ PYTHONPATH=.. python -m rag.eval plot data/<report1>.json data/<report2>.json ..
 生成的 PNG 文件会保存到 `data/`。
 
 ### 评测结果（SciFact，300 查询 / 5183 文档）
+
+> ⚠️ 下表为 **2026-07-29 的旧结果**，当时使用 BGE-M3（embedding）+ ms-marco-MiniLM-L6-v2（rerank）纯文本后端。切换至 Qwen3-VL 多模态模型后**尚未重新评测**，数值不可直接对应当前默认配置；下表仅作为历史基线与流程示例。
 
 各检索配置在 SciFact 数据集上的指标：
 
@@ -210,13 +275,16 @@ Agent 通过多轮检索把证据累积召回率从基线的 76.7% 提升到 **8
 
 - Python 3.11+
 - Qdrant (通过 Docker 启动)
-- 本地模型文件存放在 `models/`
+- 本地模型文件存放在 `models/`，多模态模式需 `Qwen3-VL-Embedding-2B` 与 `Qwen3-VL-Reranker-2B`
+- 多模态模型以 int8 量化加载，需 `bitsandbytes` 与 CUDA GPU（CPU 下可运行但极慢）
 
 ## 注意事项
 
 - `python -m rag.*` 入口需要 `rag` 包可被 Python 找到：项目根目录即 `rag` 包本身，故需在项目根目录下运行并把**上一级**目录加入搜索路径（`PYTHONPATH=..`）。完成 `pip install -e .` 后包已注册到虚拟环境，可省略该设置。
 - Qdrant collection 在服务端实际存储时使用命名空间前缀，例如 `KnowledgeBase.scifact`。
 - 如果在 `ingest` 时出现 404 或 `collection doesn't exist`，可能是 RAG 服务内存状态与 Qdrant 实际状态不同步，建议重启 RAG 服务后重新导入。
+- **切换 embedding 模型（BGE-M3 ↔ Qwen3-VL）会改变向量维度**（1024 ↔ 2048），已有 collection 会因维度不匹配导致服务启动失败，需删除并重建。
+- 多模态 embedding 后端下 `hybrid` 无效（不产稀疏向量），会静默退化为纯 dense。
 
 ## 开发
 

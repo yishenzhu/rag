@@ -1,12 +1,12 @@
 """MarkdownChunker 行为测试。"""
 
 import pytest
-from rag.core import Document
+from rag.core import Text
 from rag.engine.chunker import MarkdownChunker
 
 
-def _doc(content: str, name: str = "test.md") -> Document:
-    return Document(content=content, metadata={"source": name})
+def _doc(content: str, name: str = "test.md") -> Text:
+    return Text(content=content, metadata={"source": name})
 
 
 def test_basic_headings_split():
