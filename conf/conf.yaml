@@ -28,8 +28,9 @@ embedding:
 
 rerank:
   <<: *rerank_endpoint
-  model: "cross-encoder/ms-marco-MiniLM-L6-v2"
-  batch_size: 256
+  model: "models/Qwen3-VL-Reranker-2B"
+  batch_size: 64
+  multimodal: true
 
 log:
   level: "DEBUG"

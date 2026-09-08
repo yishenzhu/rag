@@ -115,12 +115,27 @@ class Collection:
         ]
 
         # batch rerank 全部 query，一次网络调用。rerank 分数仅用于组内排序。
+        # 候选按类型分组：文本进 texts、图片（Image.content 即 url/path）进 images，
+        # 组内重排为「文本在前、图片在后」以与后端返回的分数顺序对齐。
         if do_rerank:
-            texts = [[t.content for t in results] for results in all_results]
-            scores = await self._rerank.rerank(queries, texts)
+            group_texts: list[list[str]] = []
+            group_images: list[list[str]] = []
+            group_docs: list[list[Document]] = []
+            for results in all_results:
+                text_docs, image_docs = [], []
+                for t in results:
+                    if isinstance(t, Text):
+                        text_docs.append(t)
+                    else:
+                        image_docs.append(t)
+                group_texts.append([t.content for t in text_docs])
+                group_images.append([t.content for t in image_docs])
+                group_docs.append(text_docs + image_docs)
+
+            scores = await self._rerank.rerank(queries, group_texts, group_images)
             for i in range(len(queries)):
                 ranked = sorted(
-                    zip(scores[i], all_results[i]), key=lambda x: x[0], reverse=True
+                    zip(scores[i], group_docs[i]), key=lambda x: x[0], reverse=True
                 )
                 all_results[i] = [t for _, t in ranked]
 

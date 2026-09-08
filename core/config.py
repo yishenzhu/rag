@@ -34,10 +34,11 @@ class EmbeddingConfig(BaseModel):
 
 
 class RerankConfig(BaseModel):
-    model: str = "BAAI/bge-reranker-v2-m3"
-    batch_size: int = 32
+    model: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
+    batch_size: int = 256
     host: str = "0.0.0.0"
     port: int = 8003
+    multimodal: bool = False
 
 
 # ── rag 块（应用连接配置，供 Pipeline 用） ─────────────────────

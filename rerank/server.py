@@ -1,22 +1,31 @@
-"""Rerank 微服务 —— 独立进程加载 Cross-Encoder 模型并提供 HTTP API"""
+"""Rerank 微服务 —— 独立进程加载 CrossEncoder 模型并提供 HTTP API。
+
+按 multimodal 配置加载两类 CrossEncoder：
+- 传统文本 rerank（ms-marco / bge-reranker）
+- Qwen3-VL-Reranker：文本 + 图片多模态，int8 量化加载
+"""
+
+import argparse
+import logging
+import time
 
 import torch
-from sentence_transformers import CrossEncoder
-from fastapi import FastAPI
-from pydantic import BaseModel
 import uvicorn
-import argparse
-import time
-import logging
+from fastapi import FastAPI
+from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel
+from sentence_transformers import CrossEncoder
 
 logger = logging.getLogger(__name__)
 
 
 # ── 请求/响应模型 ──────────────────────────────────────────────
 
+
 class RerankRequest(BaseModel):
     queries: list[str]
-    texts: list[list[str]]
+    texts: list[list[str]] = []  # 每个 query 的文本文档列表
+    images: list[list[str]] = []  # 每个 query 的图片文档（http(s) URL / 本机 path），排在文本之后
 
 
 class RerankResponse(BaseModel):
@@ -25,21 +34,34 @@ class RerankResponse(BaseModel):
 
 # ── 服务主体 ────────────────────────────────────────────────────
 
+
 def create_app(
     model_name: str = "cross-encoder/ms-marco-MiniLM-L6-v2",
     batch_size: int = 256,
     device: str | None = None,
+    multimodal: bool = False,
 ) -> FastAPI:
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    logger.info("Loading rerank model: %s on %s", model_name, device)
+    load_kwargs: dict = {}
+    if multimodal:
+        from transformers import BitsAndBytesConfig
+
+        logger.info("Loading multimodal rerank model: %s on %s (int8)", model_name, device)
+        load_kwargs = {
+            "trust_remote_code": True,
+            "model_kwargs": {
+                "quantization_config": BitsAndBytesConfig(load_in_8bit=True),
+                "device_map": {"": device},
+            },
+        }
+    else:
+        logger.info("Loading rerank model: %s on %s", model_name, device)
+        load_kwargs = {"device": device, "max_length": 512}
+
     t0 = time.perf_counter()
-    model = CrossEncoder(
-        model_name,
-        device=device,
-        max_length=512,
-    )
+    model = CrossEncoder(model_name, **load_kwargs)
     elapsed = time.perf_counter() - t0
     logger.info("Rerank model loaded in %.1fs", elapsed)
 
@@ -47,25 +69,39 @@ def create_app(
 
     @app.post("/rerank", response_model=RerankResponse)
     async def rerank(req: RerankRequest):
-        pairs = [(q, t) for q, ts in zip(req.queries, req.texts) for t in ts]
+        pairs: list = []
+        for q, ts, ims in zip(req.queries, req.texts, req.images):
+            for t in ts:
+                pairs.append((q, t))
+            for im in ims:
+                if not multimodal:
+                    raise ValueError("纯文本 rerank 模型不支持图片输入（images 需配 Qwen3-VL-Reranker）")
+                pairs.append((q, {"image": im}))
+
+        if not pairs:
+            return RerankResponse(scores=[[] for _ in req.queries])
+
         t0 = time.perf_counter()
-        flat = model.predict(pairs, batch_size=batch_size).tolist()
+        flat = await run_in_threadpool(model.predict, pairs, batch_size=batch_size)
         elapsed = time.perf_counter() - t0
-        total = len(pairs)
-        logger.info("Reranked %d pairs across %d queries in %.3fs", total, len(req.queries), elapsed)
-        # 按 query 切分
+        logger.info("Reranked %d pairs across %d queries in %.3fs", len(pairs), len(req.queries), elapsed)
+
         scores = []
         idx = 0
-        for ts in req.texts:
-            scores.append(flat[idx: idx + len(ts)])
-            idx += len(ts)
+        for ts, ims in zip(req.texts, req.images):
+            n = len(ts) + len(ims)
+            scores.append([float(v) for v in flat[idx : idx + n]])
+            idx += n
         return RerankResponse(scores=scores)
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "model": model_name, "device": device}
+        return {"status": "ok", "model": model_name, "device": device, "multimodal": multimodal}
 
     return app
+
+
+# ── 入口 ────────────────────────────────────────────────────────
 
 
 def main():
@@ -83,8 +119,7 @@ def main():
     from ..core import Config
 
     cfg = Config.load(args.conf).rerank
-    # device 不配置：有 GPU 用 GPU，否则 CPU
-    app = create_app(cfg.model, cfg.batch_size)
+    app = create_app(cfg.model, cfg.batch_size, multimodal=cfg.multimodal)
     uvicorn.run(app, host=cfg.host, port=cfg.port)
 
 
