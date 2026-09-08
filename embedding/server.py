@@ -2,12 +2,13 @@
 
 两个后端工厂，由 create_app 统一路由：
 - bge_app：FlagEmbedding.BGEM3FlagModel，文本 + 稀疏（默认）
-- jina_app：transformers.AutoModel（trust_remote_code），jina-clip-v2 文本 + 图片多模态
+- qwen_vl_app：sentence-transformers 加载 Qwen3-VL-Embedding，文本 + 图片多模态
 """
 
 import argparse
 import logging
 import time
+from os.path import abspath
 
 import numpy as np
 import torch
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 class EmbedRequest(BaseModel):
     texts: list[str] = []
-    images: list[str] = []  # http(s) URL 或 dataURI base64，供多模态后端使用
+    images: list[str] = []  # http(s) URL 或服务端本机图片路径，供多模态后端使用
     hybrid: bool = False
 
 
@@ -39,6 +40,13 @@ class DimsResponse(BaseModel):
     dims: int
 
 
+def image_ref(value: str) -> str:
+    """http(s)/oss URL 原样透传；其余视为服务端本机路径，转 file:// 绝对路径。"""
+    if value.startswith(("http://", "https://", "oss://")):
+        return value
+    return "file://" + abspath(value)
+
+
 # ── 服务主体 ────────────────────────────────────────────────────
 
 
@@ -50,7 +58,7 @@ def create_app(
 ) -> FastAPI:
     """按是否多模态路由：multimodal=True 时创建多模态 app。"""
     if multimodal:
-        return jina_app(model_name, batch_size, device)
+        return qwen_vl_app(model_name, batch_size, device)
     return bge_app(model_name, batch_size, device)
 
 
@@ -113,27 +121,24 @@ def bge_app(
     return app
 
 
-def jina_app(
+def qwen_vl_app(
     model_name: str,
     batch_size: int,
     device: str | None,
 ) -> FastAPI:
-    """jina-clip-v2 多模态后端：文本与图片嵌入同一向量空间。"""
+    """Qwen3-VL-Embedding 多模态后端：文本与图片（http(s) URL / 服务端本机 path）统一向量空间。"""
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
     logger.info("Loading multimodal embedding model: %s on %s", model_name, device)
     t0 = time.perf_counter()
-    from transformers import AutoModel
+    from sentence_transformers import SentenceTransformer
 
-    model = AutoModel.from_pretrained(
-        model_name,
-        trust_remote_code=True,
-        device_map=device,
+    model = SentenceTransformer(
+        model_name, trust_remote_code=True, device=device
     )
-    model.eval()
-    # 用一次空文本前向探测输出维度（1024），同时触发权重加载
-    probe = model.encode_text([""])
+    # 用一次空文本前向探测输出维度（2048），同时触发权重加载
+    probe = model.encode([""])
     dims = probe.shape[-1]
     elapsed = time.perf_counter() - t0
     logger.info("Multimodal model loaded in %.1fs, dims=%d", elapsed, dims)
@@ -142,23 +147,18 @@ def jina_app(
 
     @app.post("/embed", response_model=EmbedResponse)
     async def embed(req: EmbedRequest):
-        # hybrid 无意义：jina-clip-v2 不产出稀疏向量，直接忽略
+        # hybrid 无意义：Qwen3-VL-Embedding 不产出稀疏向量，直接忽略
         if not req.texts and not req.images:
             return EmbedResponse(dense_vecs=[], count=0, dimension=dims)
 
-        parts = []
-        if req.texts:
-            text_embs = await run_in_threadpool(
-                model.encode_text, req.texts, batch_size=batch_size
-            )
-            parts.append(np.asarray(text_embs, dtype=np.float32))
-        if req.images:
-            image_embs = await run_in_threadpool(
-                model.encode_image, req.images, batch_size=batch_size
-            )
-            parts.append(np.asarray(image_embs, dtype=np.float32))
+        inputs: list[str | dict] = []
+        inputs.extend(req.texts)  # 纯文本 str
+        inputs.extend({"image": image_ref(v)} for v in req.images)
 
-        dense = np.concatenate(parts, axis=0).tolist()
+        embeddings = await run_in_threadpool(
+            model.encode, inputs, batch_size=batch_size, normalize_embeddings=True
+        )
+        dense = np.asarray(embeddings, dtype=np.float32).tolist()
         return EmbedResponse(
             dense_vecs=dense,
             sparse_vectors=None,
@@ -193,7 +193,7 @@ def main():
     parser.add_argument("--port", type=int, default=8002)
     parser.add_argument("--device", default=None, help="cuda / cpu，默认自动检测")
     parser.add_argument(
-        "--multimodal", action="store_true", help="强制以多模态（jina-clip-v2）模式加载"
+        "--multimodal", action="store_true", help="强制以多模态（Qwen3-VL-Embedding）模式加载"
     )
     args = parser.parse_args()
 

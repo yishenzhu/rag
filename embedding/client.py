@@ -20,7 +20,7 @@ class EmbeddingClient:
     ) -> tuple[np.ndarray, list[dict] | None]:
         """编码文本与图片，返回 (dense, sparse)。
 
-        texts 为文本原文；images 为 http(s) URL 或 dataURI base64 字符串，
+        texts 为文本原文；images 为 http(s) URL 或服务端本机图片路径字符串，
         dense 行序 = texts + images。sparse 仅在 BGE-M3 且 hybrid=True 时非 None，
         多模态后端恒为 None。
         """

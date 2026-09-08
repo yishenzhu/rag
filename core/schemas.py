@@ -32,20 +32,17 @@ class Text(BaseModel):
 
 
 class Image(BaseModel):
-    """与 Text 平级的图片内容单元。url 与 base64 必须且仅有一个非 None（对外接口不接受本地 path）。"""
+    """与 Text 平级的图片内容单元。url 与 path 必须且仅有一个非 None（path 为服务端本机可读路径）。"""
 
     type: Literal["image"] = "image"
     url: str | None = Field(default=None, description="http(s) 图片 URL")
-    base64: str | None = Field(
-        default=None,
-        description="内联图片 data URI（data:image/...;base64,...，由入库方保证格式）",
-    )
+    path: str | None = Field(default=None, description="服务端本机图片文件路径")
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_source(self):
-        if (self.url is None) == (self.base64 is None):
-            raise ValueError("url 与 base64 必须且仅有一个非 None")
+        if (self.url is None) == (self.path is None):
+            raise ValueError("url 与 path 必须且仅有一个非 None")
         return self
 
     @property
@@ -55,8 +52,8 @@ class Image(BaseModel):
 
     @property
     def content(self) -> str:
-        """统一内容访问器：返回图片的模型输入串（url 或 data URI base64）。"""
-        return self.url or self.base64
+        """统一内容访问器：返回图片的模型输入串（url 或服务端本机 path）。"""
+        return self.url or self.path
 
 
 Document: TypeAlias = Annotated[Text | Image, Field(discriminator="type")]
