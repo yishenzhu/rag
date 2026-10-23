@@ -1,18 +1,22 @@
 from fastapi import APIRouter, Depends
+
 from ..core import (
-    CreateReq,
-    CreateRsp,
     AppError,
+    CreateCollectionRequest,
+    CreateCollectionResponse,
 )
-from ..engine import Pipeline
+from ..engine import RAGPipeline
 
 memory_router = APIRouter(prefix="/memory", tags=["记忆库"])
 
 
-@memory_router.post("", response_model=CreateRsp, tags=["创建记忆表"])
-async def create_collection(req: CreateReq, pipeline: Pipeline = Depends(Pipeline.get)):
+@memory_router.post("", response_model=CreateCollectionResponse, tags=["创建记忆表"])
+async def create_collection(
+    req: CreateCollectionRequest,
+    pipeline: RAGPipeline = Depends(RAGPipeline.from_request),
+):
     try:
-        await pipeline._memory.create(req.model_dump())
-        return CreateRsp(collection=req.name, success=True)
+        await pipeline._memory.create_collection(req.model_dump())
+        return CreateCollectionResponse(collection=req.name, success=True)
     except AppError as e:
-        return CreateRsp(collection=req.name, error_code=e.code)
+        return CreateCollectionResponse(collection=req.name, error_code=e.code)

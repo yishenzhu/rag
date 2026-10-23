@@ -6,7 +6,8 @@ import httpx
 import pytest
 from rag.core import AppError, CollectionInfo, EmbeddingConfig, ErrorCode
 from rag.embedding.client import EmbeddingClient
-from rag.engine import base
+from rag.engine import collection as collection_module
+from rag.engine.collection import VectorCollection
 from rag.engine.knowledge_base import KnowledgeBase
 
 
@@ -33,7 +34,7 @@ class FakeStore:
         self._metadata = metadata or {}
         self.created: dict | None = None
 
-    async def connect(self):
+    async def load_collection_info(self):
         return None
 
     @property
@@ -54,8 +55,8 @@ def make_collection(
     monkeypatch, metadata: dict, dims: int = 2048, embed_dims: int = 2048
 ):
     store = FakeStore(dims=dims, metadata=metadata)
-    monkeypatch.setattr(base, "VectorStore", lambda name, client: store)
-    collection = base.Collection(
+    monkeypatch.setattr(collection_module, "QdrantVectorStore", lambda name, client: store)
+    collection = VectorCollection(
         "KnowledgeBase.test",
         FakeEmbed(embed_dims),
         object(),
@@ -71,19 +72,19 @@ def metadata(embedding_id: str = "qwen3vl-v1") -> dict:
 async def test_active_when_embedding_id_and_dims_match(monkeypatch):
     collection, _ = make_collection(monkeypatch, metadata())
 
-    assert await collection.validate() is True
+    assert await collection.check_compatibility() is True
     assert collection.active is True
-    assert collection.info().embedding_id == "qwen3vl-v1"
-    assert collection.info().inactive_reason is None
+    assert collection.get_info().embedding_id == "qwen3vl-v1"
+    assert collection.get_info().inactive_reason is None
 
 
 @pytest.mark.asyncio
 async def test_legacy_collection_without_embedding_id_is_inactive(monkeypatch):
     collection, _ = make_collection(monkeypatch, {"name": "test"})
 
-    assert await collection.validate() is False
+    assert await collection.check_compatibility() is False
     assert collection.active is False
-    assert collection.info().inactive_reason == "missing embedding_id"
+    assert collection.get_info().inactive_reason == "missing embedding_id"
 
 
 @pytest.mark.asyncio
@@ -91,8 +92,8 @@ async def test_embedding_id_mismatch_is_inactive(monkeypatch):
     collection, _ = make_collection(monkeypatch, metadata("bge-m3-v1"))
     embed = collection._embed
 
-    assert await collection.validate() is False
-    assert "embedding_id mismatch" in collection.info().inactive_reason
+    assert await collection.check_compatibility() is False
+    assert "embedding_id mismatch" in collection.get_info().inactive_reason
     assert embed.calls == 1
 
 
@@ -102,9 +103,9 @@ async def test_dimension_mismatch_is_inactive(monkeypatch):
         monkeypatch, metadata(), dims=1024, embed_dims=2048
     )
 
-    assert await collection.validate() is False
+    assert await collection.check_compatibility() is False
     assert "embedding dims 2048 != collection dims 1024" == (
-        collection.info().inactive_reason
+        collection.get_info().inactive_reason
     )
 
 
@@ -121,11 +122,11 @@ async def test_initialize_keeps_service_alive_and_hides_inactive(monkeypatch):
         "KnowledgeBase.inactive": inactive,
     }
     monkeypatch.setattr(
-        base, "VectorStore", lambda name, client: stores[name]
+        collection_module, "QdrantVectorStore", lambda name, client: stores[name]
     )
     registry = KnowledgeBase(FakeEmbed(), object(), None)
 
-    await registry.initialize(
+    await registry.load_collections(
         [
             SimpleNamespace(name="KnowledgeBase.active"),
             SimpleNamespace(name="KnowledgeBase.inactive"),
@@ -139,22 +140,22 @@ async def test_initialize_keeps_service_alive_and_hides_inactive(monkeypatch):
     ]
 
     with pytest.raises(AppError) as exc:
-        registry.collection("inactive")
+        registry.get_collection("inactive")
     assert exc.value.code == ErrorCode.COLLECTION_INACTIVE
 
 
 @pytest.mark.asyncio
 async def test_create_stores_embedding_id_but_not_runtime_state(monkeypatch):
     store = FakeStore(dims=2048)
-    monkeypatch.setattr(base, "VectorStore", lambda name, client: store)
+    monkeypatch.setattr(collection_module, "QdrantVectorStore", lambda name, client: store)
     registry = KnowledgeBase(FakeEmbed(), object(), None)
 
-    await registry.create({"name": "new"})
+    await registry.create_collection({"name": "new"})
 
     assert store.created["embedding_id"] == "qwen3vl-v1"
     assert "active" not in store.created
     assert "inactive_reason" not in store.created
-    assert registry.collection("new").active is True
+    assert registry.get_collection("new").active is True
 
 
 @pytest.mark.asyncio

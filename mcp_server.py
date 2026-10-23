@@ -6,25 +6,25 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .core import CollectionInfo, Config, FilterRule, SearchResult
-from .engine import Pipeline
+from .engine import RAGPipeline
 
 logger = logging.getLogger(__name__)
 
 
 async def main():
     conf = Config.load()
-    pipeline = await Pipeline(conf.rag).setup()
+    pipeline = await RAGPipeline(conf.rag).initialize()
 
     mcp = FastMCP("RAG MCP", host=conf.mcp.host, port=conf.mcp.port)
 
     @mcp.tool(description="添加用户记忆，用户要求记住或暴露用户重要信息时使用")
     async def add_memory(memories: list[str]) -> bool:
-        await pipeline._memory.add("user", memories)
+        await pipeline._memory.add_memories("user", memories)
         return True
 
     @mcp.tool(description="搜索用户记忆")
     async def search_memory(queries: list[str]) -> list[SearchResult]:
-        return await pipeline._memory.search("user", queries, rerank=True)
+        return await pipeline._memory.search_collection("user", queries, rerank=True)
 
     @mcp.tool(description="列出所有知识库")
     async def list_knowledge() -> list[CollectionInfo]:
@@ -39,7 +39,7 @@ async def main():
             default=None, description="元数据过滤规则列表"
         ),
     ) -> list[SearchResult]:
-        return await pipeline._knowledge.search(
+        return await pipeline._knowledge.search_collection(
             collection, queries, top_k=top_k, rerank=True, filters=filters
         )
 

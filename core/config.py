@@ -51,10 +51,10 @@ class RerankConfig(BaseModel):
     multimodal: bool = False
 
 
-# ── rag 块（应用连接配置，供 Pipeline 用） ─────────────────────
+# ── rag 块（应用连接配置，供 RAGPipeline 用） ─────────────────────
 
 
-class EndpointRef(BaseModel):
+class ServiceEndpoint(BaseModel):
     """客户端连接端点：host + port（与 qdrant 同构），server 为派生完整地址。"""
 
     host: str
@@ -65,15 +65,15 @@ class EndpointRef(BaseModel):
         return f"http://{self.host}:{self.port}"
 
 
-class VectorStoreConfig(BaseModel):
+class QdrantConfig(BaseModel):
     host: str = "localhost"
     port: int = 6333
 
 
 class RAGConfig(BaseModel):
-    qdrant: VectorStoreConfig
-    embedding: EndpointRef
-    rerank: EndpointRef
+    qdrant: QdrantConfig
+    embedding: ServiceEndpoint
+    rerank: ServiceEndpoint
 
 
 class LogConfig(BaseModel):

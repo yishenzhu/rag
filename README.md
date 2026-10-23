@@ -5,9 +5,9 @@
 ## 目录结构
 
 - `main.py` - 启动 RAG API 服务
-- `mcp_svr.py` - 启动 MCP Server
+- `mcp_server.py` - 启动 MCP Server
 - `conf/conf.yaml` - 服务配置
-- `engine/` - 核心业务逻辑：知识库、记忆库、管道、chunker
+- `engine/` - 核心业务逻辑：知识库、记忆库、向量集合与注册表、RAG 管道、chunker
 - `embedding/` - 多模态嵌入微服务（Qwen3-VL-Embedding / BGE-M3）
 - `rerank/` - 多模态重排微服务（Qwen3-VL-Reranker）
 - `eval/` - 评测与数据集导入工具

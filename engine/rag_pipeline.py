@@ -10,7 +10,7 @@ from .knowledge_base import KnowledgeBase
 from .memory_bank import MemoryBank
 
 
-class Pipeline:
+class RAGPipeline:
     def __init__(self, conf: RAGConfig):
         self._conf = conf
         self._store = AsyncQdrantClient(host=conf.qdrant.host, port=conf.qdrant.port)
@@ -19,16 +19,16 @@ class Pipeline:
         self._memory = MemoryBank(self._embedding, self._store, self._reranker)
         self._knowledge = KnowledgeBase(self._embedding, self._store, self._reranker)
 
-    async def setup(self):
+    async def initialize(self):
         collections = await self._store.get_collections()
         await asyncio.gather(
-            self._memory.initialize(collections.collections),
-            self._knowledge.initialize(collections.collections),
+            self._memory.load_collections(collections.collections),
+            self._knowledge.load_collections(collections.collections),
         )
 
         return self
 
-    def attach(self, app: FastAPI):
+    def bind_app(self, app: FastAPI):
         app.state.pipeline = self
         return self
 
@@ -39,5 +39,5 @@ class Pipeline:
         )
 
     @classmethod
-    def get(cls, request: Request) -> "Pipeline":
+    def from_request(cls, request: Request) -> "RAGPipeline":
         return request.app.state.pipeline

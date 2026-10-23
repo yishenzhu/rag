@@ -9,7 +9,7 @@ DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "sparse"
 
 
-class VectorStore:
+class QdrantVectorStore:
     def __init__(
         self,
         name: str,
@@ -19,7 +19,7 @@ class VectorStore:
         self._client = client
         self._dims = None
 
-    async def connect(self):
+    async def load_collection_info(self):
         if not self._dims:
             info = await self._client.get_collection(self._name)
             self._dims = info.config.params.vectors[DENSE_VECTOR_NAME].size
@@ -34,7 +34,7 @@ class VectorStore:
         return self._dims
 
     @classmethod
-    def to_filter(cls, filters: list[FilterRule] | None) -> models.Filter | None:
+    def build_filter(cls, filters: list[FilterRule] | None) -> models.Filter | None:
         """把过滤规则列表翻译成 Qdrant Filter。返回 None 表示不过滤。
 
         filter 规则的 key 是 metadata 字段名（如 speaker/timestamp），
@@ -84,7 +84,7 @@ class VectorStore:
 
         return models.Filter(must=conditions) if conditions else None
 
-    async def insert(
+    async def upsert_points(
         self,
         payloads: list[dict[str, Any]],
         ids: list[str],
@@ -131,7 +131,7 @@ class VectorStore:
             points=points,
         )
 
-    async def query(
+    async def search_points(
         self,
         dense_vectors: list[list[float]],
         top_k: int,
@@ -140,7 +140,7 @@ class VectorStore:
         sparse_vectors: list[dict | None] | None = None,
     ) -> list[list[models.ScoredPoint]]:
         """批量检索，返回 per-query 结果列表，不做融合。"""
-        filter_ = self.__class__.to_filter(filters) if filters else None
+        filter_ = self.__class__.build_filter(filters) if filters else None
 
         requests = []
         for i, dv in enumerate(dense_vectors):
@@ -193,7 +193,7 @@ class VectorStore:
             metadata=self._metadata,
         )
 
-    async def list_all(self):
+    async def scroll_all(self):
         all_points = []
         offset = None
 

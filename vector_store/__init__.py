@@ -1,1 +1,1 @@
-from .qdrant import VectorStore, SPARSE_VECTOR_NAME
+from .qdrant import SPARSE_VECTOR_NAME, QdrantVectorStore

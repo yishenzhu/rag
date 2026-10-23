@@ -35,7 +35,7 @@ class EmbedResponse(BaseModel):
     dimension: int
 
 
-class DimsResponse(BaseModel):
+class ModelInfoResponse(BaseModel):
     dims: int
     embedding_id: str = ""
 
@@ -105,9 +105,9 @@ def bge_app(
             dimension=dims,
         )
 
-    @app.get("/dims", response_model=DimsResponse)
+    @app.get("/dims", response_model=ModelInfoResponse)
     async def get_dims():
-        return DimsResponse(dims=dims, embedding_id=embedding_id)
+        return ModelInfoResponse(dims=dims, embedding_id=embedding_id)
 
     @app.get("/health")
     async def health():
@@ -177,9 +177,9 @@ def qwen_vl_app(
             dimension=dims,
         )
 
-    @app.get("/dims", response_model=DimsResponse)
+    @app.get("/dims", response_model=ModelInfoResponse)
     async def get_dims():
-        return DimsResponse(dims=dims, embedding_id=embedding_id)
+        return ModelInfoResponse(dims=dims, embedding_id=embedding_id)
 
     @app.get("/health")
     async def health():

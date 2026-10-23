@@ -1,6 +1,6 @@
 """RAG MCP 客户端（最小实现）。
 
-工具由 ``mcp_svr.py`` 提供，这里只负责连上并调用：
+工具由 ``mcp_server.py`` 提供，这里只负责连上并调用：
 ``search_knowledge`` 返回原始结果（每项形如 {"payload": {"content", "metadata"}}，
 metadata 含 source / datetime / doc_id），不额外封装。
 

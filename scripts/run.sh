@@ -87,7 +87,7 @@ start_api() {
 
 start_mcp() {
     log_info "启动 MCP Server (端口 9000) ..."
-    nohup python -m rag.mcp_svr > "$ROOT_DIR/logs/mcp.log" 2>&1 &
+    nohup python -m rag.mcp_server > "$ROOT_DIR/logs/mcp.log" 2>&1 &
 }
 
 # ── 命令实现 ──────────────────────────────────────────
@@ -150,7 +150,7 @@ cmd_start() {
 
 cmd_stop() {
     log_info "停止服务 ..."
-    pkill -f "rag.mcp_svr"  2>/dev/null && log_info "MCP Server 已停止" || true
+    pkill -f "rag.mcp_server"  2>/dev/null && log_info "MCP Server 已停止" || true
     pkill -f "rag.main"               2>/dev/null && log_info "RAG API 已停止"    || true
     pkill -f "rag.rerank.server" 2>/dev/null && log_info "Rerank 已停止"  || true
     pkill -f "rag.embedding.server" 2>/dev/null && log_info "Embedding 已停止" || true
@@ -177,7 +177,7 @@ cmd_status() {
     for s in "Embedding|rag.embedding.server|8002" \
              "Rerank|rag.rerank.server|8003" \
              "API|rag.main|8001" \
-             "MCP|rag.mcp_svr|9000"; do
+             "MCP|rag.mcp_server|9000"; do
         IFS='|' read -r name cmd port <<< "$s"
         if ! pgrep -f "$cmd" >/dev/null 2>&1; then
             printf "  %-12s ❌\n" "$name"

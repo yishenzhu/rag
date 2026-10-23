@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from .core import Config, setup_logger
-from .engine import Pipeline
+from .engine import RAGPipeline
 from .routes import router
 
 conf = Config.load()
@@ -11,7 +11,7 @@ conf = Config.load()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    pipeline = await Pipeline(conf.rag).attach(app).setup()
+    pipeline = await RAGPipeline(conf.rag).bind_app(app).initialize()
     try:
         yield
     finally:

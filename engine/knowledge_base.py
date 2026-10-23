@@ -1,11 +1,12 @@
 from datetime import datetime
+
 from ..core import Document, Image, Text
-from .chunker import RecursiveChunker, SemanticChunker, MarkdownChunker
-from .base import Registry
+from .chunker import MarkdownChunker, RecursiveChunker, SemanticChunker
+from .registry import CollectionRegistry
 
 
-class KnowledgeBase(Registry):
-    async def ingest(
+class KnowledgeBase(CollectionRegistry):
+    async def ingest_documents(
         self,
         name: str,
         documents: list[Document],
@@ -13,7 +14,7 @@ class KnowledgeBase(Registry):
         chunk_overlap: int | None = None,
         chunker_type: str | None = None,
     ):
-        collection = self.collection(name)
+        collection = self.get_collection(name)
 
         # 图片不可切分（content 是 url/path），仅文本参与分块
         text_docs = [d for d in documents if isinstance(d, Text)]
@@ -43,4 +44,4 @@ class KnowledgeBase(Registry):
         for item in items:
             item.metadata["indexed_at"] = now
 
-        await collection.insert(items)
+        await collection.upsert(items)

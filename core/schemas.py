@@ -63,7 +63,7 @@ Chunk: TypeAlias = Text
 Memory: TypeAlias = Text
 
 
-class CreateReq(BaseModel):
+class CreateCollectionRequest(BaseModel):
     name: str
     description: str | None = None
     enabled: bool = True
@@ -71,19 +71,19 @@ class CreateReq(BaseModel):
     fields: list[dict[str, str]] = Field(default_factory=list)
 
 
-class CreateRsp(BaseModel):
+class CreateCollectionResponse(BaseModel):
     collection: str
     success: bool = False
     error_code: ErrorCode | None = None
 
 
-class DeleteRsp(BaseModel):
+class DeleteCollectionResponse(BaseModel):
     collection: str
     success: bool = False
     error_code: ErrorCode | None = None
 
 
-class CollectionInfo(CreateReq):
+class CollectionInfo(CreateCollectionRequest):
     created_at: str = Field(
         default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     )
@@ -96,7 +96,7 @@ class CollectionInfo(CreateReq):
     inactive_reason: str | None = None
 
 
-class CollectionBriefInfo(BaseModel):
+class CollectionSummary(BaseModel):
     name: str
     description: str | None = None
     fields: list[dict[str, str]] = Field(default_factory=list)
@@ -105,7 +105,7 @@ class CollectionBriefInfo(BaseModel):
     inactive_reason: str | None = None
 
 
-class IngestReq(BaseModel):
+class IngestRequest(BaseModel):
     collection: str
     documents: list[Document]
     chunk_size: int | None = None
@@ -113,7 +113,7 @@ class IngestReq(BaseModel):
     chunker_type: str | None = None  # None=不分块, recursive, semantic, markdown
 
 
-class IngestRsp(BaseModel):
+class IngestResponse(BaseModel):
     collection: str
     success: bool = False
     count: int = 0
@@ -149,7 +149,7 @@ class SearchResult(BaseModel):
     payload: Document
 
 
-class SearchReq(BaseModel):
+class SearchRequest(BaseModel):
     collection: str
     queries: list[str]
     top_k: int = 5
@@ -159,12 +159,12 @@ class SearchReq(BaseModel):
     filters: list[FilterRule] | None = None
 
 
-class SearchRsp(BaseModel):
+class SearchResponse(BaseModel):
     results: list[SearchResult]
     success: bool = False
     error_code: ErrorCode | None = None
 
 
-class ListRsp(BaseModel):
-    collections: list[CollectionInfo | CollectionBriefInfo]
+class ListCollectionsResponse(BaseModel):
+    collections: list[CollectionInfo | CollectionSummary]
     count: int
