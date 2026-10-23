@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, TypeAdapter, model_validator
 class ErrorCode(StrEnum):
     COLLECTION_NOT_FOUND = "COLLECTION_NOT_FOUND"
     COLLECTION_DISABLED = "COLLECTION_DISABLED"
+    COLLECTION_INACTIVE = "COLLECTION_INACTIVE"
     COLLECTION_EXISTS = "COLLECTION_EXISTS"
 
 
@@ -88,12 +89,20 @@ class CollectionInfo(CreateReq):
     )
     # 该库可用的 metadata 字段 schema，供 AI 构造过滤规则
     fields: list[dict[str, str]] = Field(default_factory=list)
+    # 向量化管道版本；具体模型/维度/归一化等由代码侧 registry 展开
+    embedding_id: str = ""
+    # 运行时状态，不写入 Qdrant collection metadata
+    active: bool = True
+    inactive_reason: str | None = None
 
 
 class CollectionBriefInfo(BaseModel):
     name: str
     description: str | None = None
     fields: list[dict[str, str]] = Field(default_factory=list)
+    embedding_id: str = ""
+    active: bool = True
+    inactive_reason: str | None = None
 
 
 class IngestReq(BaseModel):

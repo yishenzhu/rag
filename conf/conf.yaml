@@ -22,6 +22,7 @@ rag:
 
 embedding:
   <<: *embedding_endpoint
+  id: "qwen3vl-2b-int8-v1"  # 向量化管道版本；换模型/量化/预处理时 bump
   model: "models/Qwen3-VL-Embedding-2B"
   batch_size: 32
   multimodal: true        # 多模态（Qwen3-VL-Embedding，int8 量化）；false 走 BGE-M3

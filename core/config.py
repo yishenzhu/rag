@@ -26,11 +26,21 @@ class EmbeddingConfig(BaseModel):
     """embedding 服务进程启动配置（conf.yaml 顶层 embedding 块）。
     device 不配置：有 GPU 用 GPU，否则 CPU。"""
 
+    # 向量化管道版本：模型/量化/预处理任一变化都应 bump。
+    # 留空时按模型名 + 模态生成兜底值。
+    id: str = ""
     model: str = "BAAI/bge-m3"
     batch_size: int = 32
     host: str = "0.0.0.0"
     port: int = 8002
     multimodal: bool = False
+
+    @property
+    def embedding_id(self) -> str:
+        if self.id:
+            return self.id
+        name = Path(self.model).name.lower().replace("_", "-")
+        return f"{name}-{'mm' if self.multimodal else 'text'}"
 
 
 class RerankConfig(BaseModel):

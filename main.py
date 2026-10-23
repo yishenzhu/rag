@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
+
 from .core import Config, setup_logger
 from .engine import Pipeline
 from .routes import router

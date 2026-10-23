@@ -10,6 +10,7 @@ class EmbeddingClient:
     def __init__(self, base_url: str, timeout: float = 120.0):
         self._client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=timeout)
         self._dims: int | None = None
+        self._embedding_id = ""
         logger.info("EmbeddingClient connected to %s", base_url)
 
     async def encode(
@@ -43,8 +44,14 @@ class EmbeddingClient:
         if self._dims is None:
             rsp = await self._client.get("/dims")
             rsp.raise_for_status()
-            self._dims = rsp.json()["dims"]
+            data = rsp.json()
+            self._dims = data["dims"]
+            self._embedding_id = data.get("embedding_id", "")
         return self._dims
+
+    @property
+    def embedding_id(self) -> str:
+        return self._embedding_id
 
     async def aclose(self) -> None:
         await self._client.aclose()

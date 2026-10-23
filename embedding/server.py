@@ -37,6 +37,7 @@ class EmbedResponse(BaseModel):
 
 class DimsResponse(BaseModel):
     dims: int
+    embedding_id: str = ""
 
 
 # ── 服务主体 ────────────────────────────────────────────────────
@@ -47,17 +48,19 @@ def create_app(
     batch_size: int = 128,
     device: str | None = None,
     multimodal: bool = False,
+    embedding_id: str = "",
 ) -> FastAPI:
     """按是否多模态路由：multimodal=True 时创建多模态 app。"""
     if multimodal:
-        return qwen_vl_app(model_name, batch_size, device)
-    return bge_app(model_name, batch_size, device)
+        return qwen_vl_app(model_name, batch_size, device, embedding_id)
+    return bge_app(model_name, batch_size, device, embedding_id)
 
 
 def bge_app(
     model_name: str,
     batch_size: int,
     device: str | None,
+    embedding_id: str = "",
 ) -> FastAPI:
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -104,11 +107,16 @@ def bge_app(
 
     @app.get("/dims", response_model=DimsResponse)
     async def get_dims():
-        return DimsResponse(dims=dims)
+        return DimsResponse(dims=dims, embedding_id=embedding_id)
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "model": model_name, "device": device}
+        return {
+            "status": "ok",
+            "model": model_name,
+            "device": device,
+            "embedding_id": embedding_id,
+        }
 
     return app
 
@@ -117,6 +125,7 @@ def qwen_vl_app(
     model_name: str,
     batch_size: int,
     device: str | None,
+    embedding_id: str = "",
 ) -> FastAPI:
     """Qwen3-VL-Embedding 多模态后端：文本与图片（http(s) URL / 服务端本机 path）统一向量空间。"""
     if device is None:
@@ -170,7 +179,7 @@ def qwen_vl_app(
 
     @app.get("/dims", response_model=DimsResponse)
     async def get_dims():
-        return DimsResponse(dims=dims)
+        return DimsResponse(dims=dims, embedding_id=embedding_id)
 
     @app.get("/health")
     async def health():
@@ -179,6 +188,7 @@ def qwen_vl_app(
             "model": model_name,
             "device": device,
             "multimodal": True,
+            "embedding_id": embedding_id,
         }
 
     return app
@@ -204,7 +214,12 @@ def main():
     from ..core import Config
 
     cfg = Config.load(args.conf).embedding
-    app = create_app(cfg.model, cfg.batch_size, multimodal=cfg.multimodal)
+    app = create_app(
+        cfg.model,
+        cfg.batch_size,
+        multimodal=cfg.multimodal,
+        embedding_id=cfg.embedding_id,
+    )
     uvicorn.run(app, host=cfg.host, port=cfg.port)
 
 

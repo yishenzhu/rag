@@ -1,6 +1,8 @@
-from qdrant_client import AsyncQdrantClient
 import asyncio
+
 from fastapi import FastAPI, Request
+from qdrant_client import AsyncQdrantClient
+
 from ..core import RAGConfig
 from ..embedding import EmbeddingClient
 from ..rerank import RerankClient

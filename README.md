@@ -75,6 +75,10 @@ curl -X POST http://localhost:8001/knowledge \
 curl http://localhost:8001/knowledge
 ```
 
+> 每个 collection 在 metadata 中记录 `embedding_id`（`conf/conf.yaml` 顶层 `embedding.id`）。
+> 启动时只有 id 与当前配置一致、且维度匹配的集合会标记为 active；其余标记为 inactive，
+> 不阻断服务启动。`GET /knowledge?include_inactive=true` 可查看未激活原因。
+
 ### 导入文档 / BEIR 数据集
 
 直接调用导入脚本（`rag` 包即项目根目录本身，`python -m rag.*` 需在项目根下把**上一级**目录加入搜索路径）：

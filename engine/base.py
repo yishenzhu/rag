@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import Any
 
@@ -32,6 +31,7 @@ class Collection:
         store_client: AsyncQdrantClient,
         rerank_client: RerankClient | None = None,
     ):
+        self._name = collection_name
         self._embed = embed_client
         self._rerank = rerank_client
         self._store = VectorStore(
@@ -39,15 +39,39 @@ class Collection:
             client=store_client,
         )
 
-    async def validate(self):
+    async def validate(self) -> bool:
+        """校验集合是否属于当前向量化管道；不匹配只标记 inactive，不阻断启动。"""
         await self._store.connect()
+        metadata = self._store.metadata or {}
+        if not metadata:
+            self._info = CollectionInfo(name=self._name)
+        else:
+            try:
+                self._info = CollectionInfo.model_validate(metadata)
+            except ValueError:
+                self._info = CollectionInfo(name=self._name)
+
         dims = await self._embed.get_dims()
-        if dims != self._store.dims:
-            raise ValueError(
-                f"Embedding dims {dims} does not match collection dims {self._store.dims}"
+        reason = None
+        if not self._info.embedding_id:
+            reason = "missing embedding_id"
+        elif self._info.embedding_id != self._embed.embedding_id:
+            reason = (
+                f"embedding_id mismatch: {self._info.embedding_id} "
+                f"!= {self._embed.embedding_id}"
             )
-        self._info = CollectionInfo.model_validate(self._store.metadata)
-        return self
+        elif dims != self._store.dims:
+            reason = f"embedding dims {dims} != collection dims {self._store.dims}"
+
+        if reason:
+            self._info.active = False
+            self._info.inactive_reason = reason
+            logger.warning("collection %s inactive: %s", self._name, reason)
+            return False
+
+        self._info.active = True
+        self._info.inactive_reason = None
+        return True
 
     @property
     def enabled(self):
@@ -56,6 +80,10 @@ class Collection:
     @property
     def hybrid(self):
         return self._info.hybrid
+
+    @property
+    def active(self) -> bool:
+        return self._info.active
 
     def info(self, brief=False) -> CollectionInfo | CollectionBriefInfo:
         return (
@@ -66,7 +94,11 @@ class Collection:
 
     async def setup(self, info: CollectionInfo):
         dims = await self._embed.get_dims()
-        await self._store.create(dims, info.model_dump())
+        info.embedding_id = self._embed.embedding_id
+        info.active = True
+        info.inactive_reason = None
+        metadata = info.model_dump(exclude={"active", "inactive_reason"})
+        await self._store.create(dims, metadata)
         self._info = info
         return self
 
@@ -178,6 +210,8 @@ class Registry:
 
         if check_enabled and not collection.enabled:
             raise AppError(ErrorCode.COLLECTION_DISABLED)
+        if check_enabled and not collection.active:
+            raise AppError(ErrorCode.COLLECTION_INACTIVE)
 
         return collection
 
@@ -204,15 +238,17 @@ class Registry:
                     name, self._embed, self._store, self._rerank
                 )
 
-        await asyncio.gather(*[c.validate() for c in self._collections.values()])
+        for collection in self._collections.values():
+            await collection.validate()
 
     def list_collections(
-        self, check_enabled: bool, brief: bool
+        self, check_enabled: bool, brief: bool, include_inactive: bool = False
     ) -> list[CollectionInfo | CollectionBriefInfo]:
         return [
             c.info(brief)
             for c in self._collections.values()
-            if not check_enabled or c.enabled
+            if (not check_enabled or c.enabled)
+            and (include_inactive or c.active)
         ]
 
     async def create(self, metadata: dict[str, Any]):

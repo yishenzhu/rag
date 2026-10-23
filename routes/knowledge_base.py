@@ -1,16 +1,17 @@
 from fastapi import APIRouter, Depends, Query
-from ..engine import Pipeline
+
 from ..core import (
-    ListRsp,
+    AppError,
     CreateReq,
     CreateRsp,
+    DeleteRsp,
     IngestReq,
     IngestRsp,
-    DeleteRsp,
+    ListRsp,
     SearchReq,
     SearchRsp,
-    AppError,
 )
+from ..engine import Pipeline
 
 knowledge_router = APIRouter(prefix="/knowledge", tags=["知识库"])
 
@@ -19,9 +20,12 @@ knowledge_router = APIRouter(prefix="/knowledge", tags=["知识库"])
 async def list_collections(
     enabled: bool = Query(True, description="激活状态"),
     brief: bool = Query(True, description="简要信息"),
+    include_inactive: bool = Query(False, description="包含向量模型不匹配的集合"),
     pipeline: Pipeline = Depends(Pipeline.get),
 ):
-    collections = pipeline._knowledge.list_collections(enabled, brief)
+    collections = pipeline._knowledge.list_collections(
+        enabled, brief, include_inactive=include_inactive
+    )
     return ListRsp(collections=collections, count=len(collections))
 
 
