@@ -15,7 +15,7 @@
   - `eval/beir/` - BEIR 数据集与指标适配器
   - `eval/lihua/` - LiHua-World 长上下文多跳检索端到端评测（评测框架 + 结果；数据集为公开语料不入库，见下方说明）
 - `vector_store/qdrant.py` - Qdrant 封装
-- `scripts/run.sh` - 统一启动/停止/状态管理脚本
+- `scripts/run.sh` - 统一启动/停止/重启/状态/日志管理脚本
 - `data/` - 评测结果与生成文件输出目录
 - `models/` - 本地模型文件
 
@@ -41,12 +41,14 @@ pip install -e .
 ./scripts/run.sh start
 ```
 
-可选参数：
+常用命令：
 
-- `./scripts/run.sh start api`：仅启动 API 服务及依赖服务
-- `./scripts/run.sh start mcp`：仅启动 MCP 服务及依赖服务
-- `./scripts/run.sh stop`：停止所有服务
-- `./scripts/run.sh status`：查看各服务运行状态
+- `./scripts/run.sh start`：启动全部服务（默认）
+- `./scripts/run.sh start api`：仅启动 API 服务及依赖服务（`mcp` / `embedding` / `rerank` / `qdrant` 同理）
+- `./scripts/run.sh stop`：停止所有服务；`stop api` 只停止单个服务
+- `./scripts/run.sh restart rerank`：重启单个服务；不带参数时重启全部
+- `./scripts/run.sh status`：查看各服务 PID、端口与就绪状态
+- `./scripts/run.sh logs api`：跟踪单个服务日志（`qdrant` / `embedding` / `rerank` / `mcp` 同理）
 
 ### 3. API 地址
 

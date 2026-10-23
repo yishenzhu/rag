@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────
-# RAG Service 管理脚本
+# RAG 服务管理脚本
 #
 # 依赖关系:
 #   API/MCP → Qdrant + Embedding + Rerank
+#
+# 用法: ./scripts/run.sh help
+# ──────────────────────────────────────────────────────
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 PARENT_DIR="$(dirname "$ROOT_DIR")"
@@ -24,188 +27,378 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
-log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
-log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
+log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
-mkdir -p "$ROOT_DIR/logs"
+LOG_DIR="$ROOT_DIR/logs"
+CONF="conf/conf.yaml"
+QDRANT_NAME="rag-qdrant"
 
-# ── 底层服务 ──────────────────────────────────────────
+mkdir -p "$LOG_DIR"
 
-start_qdrant() {
-    if ! command -v docker &>/dev/null; then
-        log_error "需要 Docker 来启动 Qdrant"
-        return 1
+# ── 服务定义 ──────────────────────────────────────────
+
+SERVICES=(qdrant embedding rerank api mcp)
+
+service_label() {
+    case "$1" in
+        qdrant)    echo "Qdrant" ;;
+        embedding) echo "Embedding" ;;
+        rerank)    echo "Rerank" ;;
+        api)       echo "API" ;;
+        mcp)       echo "MCP" ;;
+    esac
+}
+
+service_module() {
+    case "$1" in
+        embedding) echo "rag.embedding.server" ;;
+        rerank)    echo "rag.rerank.server" ;;
+        api)       echo "rag.main" ;;
+        mcp)       echo "rag.mcp_server" ;;
+    esac
+}
+
+service_port() {
+    case "$1" in
+        qdrant)    echo 6333 ;;
+        embedding) echo 8002 ;;
+        rerank)    echo 8003 ;;
+        api)       echo 8001 ;;
+        mcp)       echo 9000 ;;
+    esac
+}
+
+service_timeout() {
+    case "$1" in
+        qdrant)           echo 30 ;;
+        embedding|rerank) echo 180 ;;
+        *)                echo 60 ;;
+    esac
+}
+
+is_service() {
+    local target=$1 svc
+    for svc in "${SERVICES[@]}"; do
+        if [ "$svc" = "$target" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+require_target() {
+    local target=$1
+    if [ "$target" != all ] && ! is_service "$target"; then
+        log_error "未知服务: $target"
+        echo "可用服务: all ${SERVICES[*]}" >&2
+        exit 1
     fi
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^rag-qdrant$'; then
-        log_info "Qdrant 已在运行"
+}
+
+# ── 进程探测 ──────────────────────────────────────────
+
+# 锚定到 python 进程本身，避免误匹配命令行里包含同样字符串的 shell
+process_pattern() {
+    local module
+    module=$(service_module "$1")
+    echo "^([^ ]*/)?python[0-9.]* -m ${module//./\\.}( |$)"
+}
+
+is_running() {
+    local svc=$1
+    if [ "$svc" = qdrant ]; then
+        command -v docker >/dev/null 2>&1 &&
+            docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$QDRANT_NAME"
+        return
+    fi
+    pgrep -f "$(process_pattern "$svc")" >/dev/null 2>&1
+}
+
+service_pid() {
+    local svc=$1
+    if [ "$svc" = qdrant ]; then
+        docker inspect -f '{{.State.Pid}}' "$QDRANT_NAME" 2>/dev/null || true
+        return
+    fi
+    pgrep -f "$(process_pattern "$svc")" | head -n1
+}
+
+health_url() {
+    if [ "$1" = qdrant ]; then
+        echo "http://localhost:6333/healthz"
     else
-        log_info "启动 Qdrant ..."
-        docker run -d --rm --name rag-qdrant \
-            -p 6333:6333 -p 6334:6334 \
-            -v rag_qdrant:/qdrant/storage \
-            qdrant/qdrant:latest >/dev/null
+        echo "http://localhost:$(service_port "$1")/health"
+    fi
+}
 
-        for i in $(seq 1 15); do
-            if curl -sf http://localhost:6333/healthz >/dev/null 2>&1; then
-                break
+# 返回 0=就绪，1=进程已退出，2=超时
+wait_ready() {
+    local svc=$1 timeout=$2
+    local url elapsed=0
+    url=$(health_url "$svc")
+
+    printf "  等待 %s 就绪" "$(service_label "$svc")"
+    while [ "$elapsed" -lt "$timeout" ]; do
+        if curl -sf --max-time 2 "$url" >/dev/null 2>&1; then
+            printf " ✓ (%ss)\n" "$elapsed"
+            return 0
+        fi
+        if ! is_running "$svc"; then
+            printf " ✗\n"
+            log_error "$(service_label "$svc") 进程已退出，最近日志："
+            if [ "$svc" = qdrant ]; then
+                docker logs --tail 20 "$QDRANT_NAME" 2>&1 || true
+            else
+                tail -n 20 "$LOG_DIR/$svc.log" 2>/dev/null || true
             fi
-            sleep 1
-        done
-        log_info "Qdrant 就绪"
+            return 1
+        fi
+        printf "."
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    printf " ✗\n"
+    log_warn "$(service_label "$svc") 在 ${timeout}s 内未就绪，请查看 logs/$svc.log"
+    return 2
+}
+
+# ── 启停实现 ──────────────────────────────────────────
+
+start_service() {
+    local svc=$1
+    if is_running "$svc"; then
+        log_info "$(service_label "$svc") 已在运行 (PID $(service_pid "$svc"))"
+        return 0
     fi
+
+    local module log_file
+    module=$(service_module "$svc")
+    log_file="$LOG_DIR/$svc.log"
+
+    case "$svc" in
+        qdrant)
+            if ! command -v docker >/dev/null 2>&1; then
+                log_error "需要 Docker 来启动 Qdrant"
+                return 1
+            fi
+            log_info "启动 Qdrant ..."
+            docker run -d --rm --name "$QDRANT_NAME" \
+                -p 6333:6333 -p 6334:6334 \
+                -v rag_qdrant:/qdrant/storage \
+                qdrant/qdrant:latest >/dev/null
+            ;;
+        embedding|rerank)
+            log_info "启动 $(service_label "$svc") 服务（--conf $CONF）..."
+            nohup python -m "$module" --conf "$CONF" \
+                >"$log_file" 2>&1 &
+            ;;
+        api)
+            log_info "启动 RAG API 服务 (端口 8001) ..."
+            nohup python -m "$module" >"$log_file" 2>&1 &
+            ;;
+        mcp)
+            log_info "启动 MCP Server (端口 9000) ..."
+            nohup python -m "$module" >"$log_file" 2>&1 &
+            ;;
+    esac
 }
 
-start_embedding() {
-    if pgrep -f "rag.embedding.server" >/dev/null 2>&1; then
-        log_info "Embedding 服务已在运行"
-        return
+start_group() {
+    local svc
+
+    # 先全部拉起，模型服务可以并行加载
+    for svc in "$@"; do
+        start_service "$svc" || exit 1
+    done
+
+    for svc in "$@"; do
+        local rc=0
+        wait_ready "$svc" "$(service_timeout "$svc")" || rc=$?
+        if [ "$rc" -eq 1 ]; then
+            log_error "启动中止"
+            exit 1
+        fi
+    done
+}
+
+stop_service() {
+    local svc=$1
+    if ! is_running "$svc"; then
+        log_warn "$(service_label "$svc") 未运行"
+        return 0
     fi
-    log_info "启动 Embedding 服务（配置见 conf/conf.yaml embedding）..."
-    nohup python -m rag.embedding.server --conf conf/conf.yaml \
-        > "$ROOT_DIR/logs/embedding.log" 2>&1 &
-    log_info "Embedding 启动中，请稍候（模型加载约需 30-60 秒）"
-}
 
-start_rerank() {
-    if pgrep -f "rag.rerank.server" >/dev/null 2>&1; then
-        log_info "Rerank 服务已在运行"
-        return
+    if [ "$svc" = qdrant ]; then
+        log_info "停止 Qdrant ..."
+        docker stop "$QDRANT_NAME" >/dev/null 2>&1 || true
+        return 0
     fi
-    log_info "启动 Rerank 服务（配置见 conf/conf.yaml rerank）..."
-    nohup python -m rag.rerank.server --conf conf/conf.yaml \
-        > "$ROOT_DIR/logs/rerank.log" 2>&1 &
-    log_info "Rerank 启动中，请稍候（模型加载约需 10-30 秒）"
-}
 
-# ── 应用服务 ──────────────────────────────────────────
+    local pattern
+    pattern=$(process_pattern "$svc")
+    log_info "停止 $(service_label "$svc") ..."
+    pkill -f "$pattern" 2>/dev/null || true
 
-start_api() {
-    log_info "启动 RAG API 服务 (端口 8001) ..."
-    nohup python -m rag.main > "$ROOT_DIR/logs/api.log" 2>&1 &
-}
-
-start_mcp() {
-    log_info "启动 MCP Server (端口 9000) ..."
-    nohup python -m rag.mcp_server > "$ROOT_DIR/logs/mcp.log" 2>&1 &
+    local i=0
+    while [ "$i" -lt 20 ] && is_running "$svc"; do
+        sleep 0.5
+        i=$((i + 1))
+    done
+    if is_running "$svc"; then
+        log_warn "$(service_label "$svc") 未响应 TERM，强制结束"
+        pkill -9 -f "$pattern" 2>/dev/null || true
+    fi
+    log_info "$(service_label "$svc") 已停止"
 }
 
 # ── 命令实现 ──────────────────────────────────────────
 
 cmd_start() {
-    local target="${1:-all}"
+    local target=${1:-all}
+    require_target "$target"
 
     case "$target" in
         all)
-            start_qdrant
-            start_embedding
-            start_rerank
-            echo -n "等待模型加载"
-            for i in $(seq 1 90); do
-                if curl -sf http://localhost:8002/health >/dev/null 2>&1 &&
-                   curl -sf http://localhost:8003/health >/dev/null 2>&1; then
-                    echo ""
-                    break
-                fi
-                echo -n "."
-                sleep 1
-            done
-            echo ""
-            start_api
-            start_mcp
-            log_info "所有服务已启动"
-            log_info "  API:   http://localhost:8001"
-            log_info "  MCP:   http://localhost:9000"
-            log_info "  日志:  logs/{api,mcp,embedding,rerank}.log"
+            start_group qdrant
+            start_group embedding rerank
+            start_group api mcp
+            log_info "启动流程完成，当前状态："
+            cmd_status
             ;;
-        api)
-            start_qdrant
-            start_embedding
-            start_rerank
-            start_api
+        qdrant)
+            start_group qdrant
             ;;
-        mcp)
-            start_qdrant
-            start_embedding
-            start_rerank
-            echo -n "等待模型加载"
-            for i in $(seq 1 90); do
-                if curl -sf http://localhost:8002/health >/dev/null 2>&1 &&
-                   curl -sf http://localhost:8003/health >/dev/null 2>&1; then
-                    echo ""
-                    break
-                fi
-                echo -n "."
-                sleep 1
-            done
-            echo ""
-            start_mcp
+        embedding|rerank)
+            start_group qdrant "$target"
             ;;
-        *)
-            log_error "未知服务: $target"
-            exit 1
+        api|mcp)
+            start_group qdrant embedding rerank
+            start_group "$target"
             ;;
     esac
 }
 
 cmd_stop() {
-    log_info "停止服务 ..."
-    pkill -f "rag.mcp_server"  2>/dev/null && log_info "MCP Server 已停止" || true
-    pkill -f "rag.main"               2>/dev/null && log_info "RAG API 已停止"    || true
-    pkill -f "rag.rerank.server" 2>/dev/null && log_info "Rerank 已停止"  || true
-    pkill -f "rag.embedding.server" 2>/dev/null && log_info "Embedding 已停止" || true
+    local target=${1:-all}
+    require_target "$target"
 
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^rag-qdrant$'; then
-        log_info "停止 Qdrant ..."
-        docker stop rag-qdrant >/dev/null
+    if [ "$target" = all ]; then
+        local svc
+        for svc in mcp api rerank embedding qdrant; do
+            stop_service "$svc"
+        done
+        log_info "全部服务已停止"
+    else
+        stop_service "$target"
     fi
-    log_info "全部已停止"
+}
+
+cmd_restart() {
+    local target=${1:-all}
+    require_target "$target"
+    cmd_stop "$target"
+    cmd_start "$target"
 }
 
 cmd_status() {
-    echo -e "\n  ${GREEN}服务${NC}        ${GREEN}状态${NC}"
-    echo "  ─────────────────────"
+    echo -e "\n  ${GREEN}服务${NC}         ${GREEN}PID${NC}       ${GREEN}端口${NC}    ${GREEN}状态${NC}"
+    echo "  ──────────────────────────────────────"
 
-    # Qdrant (Docker 容器)
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^rag-qdrant$'; then
-        printf "  %-12s ✅\n" "Qdrant"
-    else
-        printf "  %-12s ❌\n" "Qdrant"
-    fi
-
-    # 其余服务
-    for s in "Embedding|rag.embedding.server|8002" \
-             "Rerank|rag.rerank.server|8003" \
-             "API|rag.main|8001" \
-             "MCP|rag.mcp_server|9000"; do
-        IFS='|' read -r name cmd port <<< "$s"
-        if ! pgrep -f "$cmd" >/dev/null 2>&1; then
-            printf "  %-12s ❌\n" "$name"
-        elif curl -sf "http://localhost:$port/health" >/dev/null 2>&1; then
-            printf "  %-12s ✅\n" "$name"
+    local svc pid port state
+    for svc in "${SERVICES[@]}"; do
+        port=$(service_port "$svc")
+        pid="-"
+        if ! is_running "$svc"; then
+            state="❌ 未运行"
         else
-            printf "  %-12s ⏳\n" "$name"
+            pid=$(service_pid "$svc" 2>/dev/null || true)
+            [ -n "$pid" ] || pid="-"
+            if curl -sf --max-time 2 "$(health_url "$svc")" >/dev/null 2>&1; then
+                state="✅ 就绪"
+            else
+                state="⏳ 未就绪"
+            fi
         fi
+        printf "  %-12s %-8s %-6s %s\n" "$(service_label "$svc")" "$pid" "$port" "$state"
     done
     echo ""
 }
 
-# ── 入口 ──────────────────────────────────────────────
+cmd_logs() {
+    local svc=${1:-}
+    if [ -z "$svc" ] || ! is_service "$svc"; then
+        log_error "用法: $0 logs <${SERVICES[*]}>"
+        exit 1
+    fi
 
-usage() {
-    echo "用法: ./ctl.sh <command> [service]"
-    echo ""
-    echo "命令:"
-    echo "  start          启动所有服务"
-    echo "  start api|mcp  启动单个应用服务（依赖的底层服务也会启动）"
-    echo "  stop           停止所有服务"
-    echo "  status         查看各服务运行状态"
-    exit 0
+    if [ "$svc" = qdrant ]; then
+        if ! is_running qdrant; then
+            log_error "Qdrant 未运行"
+            exit 1
+        fi
+        exec docker logs -f --tail 100 "$QDRANT_NAME"
+    fi
+
+    local file="$LOG_DIR/$svc.log"
+    if [ ! -f "$file" ]; then
+        log_error "日志不存在: $file"
+        exit 1
+    fi
+    exec tail -n 100 -f "$file"
 }
 
-case "${1:-help}" in
-    start)  shift; cmd_start "${1:-all}" ;;
-    stop)   cmd_stop ;;
-    status) cmd_status ;;
-    *)      usage ;;
+usage() {
+    cat <<EOF
+RAG 服务管理脚本
+
+用法: $0 <命令> [服务]
+
+命令:
+  start [服务]     启动服务（默认 all）
+  stop [服务]      停止服务（默认 all）
+  restart [服务]   重启服务（默认 all）
+  status           查看服务状态
+  logs <服务>      跟踪服务日志
+  help             显示本帮助
+
+服务:
+  all              ${SERVICES[*]}
+  qdrant           仅启动/停止 Qdrant
+  embedding        启动时自动拉起 Qdrant
+  rerank           启动时自动拉起 Qdrant
+  api              启动时自动拉起 Qdrant/Embedding/Rerank
+  mcp              启动时自动拉起 Qdrant/Embedding/Rerank
+
+示例:
+  $0 start                 # 启动全部服务
+  $0 start api             # 只启动 API 及其依赖
+  $0 restart rerank        # 重启 Rerank
+  $0 stop embedding        # 只停止 Embedding
+  $0 logs api              # 跟踪 API 日志
+EOF
+}
+
+# ── 入口 ──────────────────────────────────────────────
+
+COMMAND=${1:-help}
+if [ $# -gt 0 ]; then
+    shift
+fi
+
+case "$COMMAND" in
+    start)   cmd_start "${1:-all}" ;;
+    stop)    cmd_stop "${1:-all}" ;;
+    restart) cmd_restart "${1:-all}" ;;
+    status)  cmd_status ;;
+    logs)    cmd_logs "${1:-}" ;;
+    help|-h|--help) usage ;;
+    *)
+        log_error "未知命令: $COMMAND"
+        echo ""
+        usage
+        exit 1
+        ;;
 esac
