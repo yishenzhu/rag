@@ -1,4 +1,5 @@
 import asyncio
+from typing import Self
 
 from fastapi import FastAPI, Request
 from qdrant_client import AsyncQdrantClient
@@ -39,5 +40,6 @@ class RAGPipeline:
         )
 
     @classmethod
-    def from_request(cls, request: Request) -> "RAGPipeline":
-        return request.app.state.pipeline
+    def from_request(cls, request: Request) -> Self | None:
+        pipeline = request.app.state.pipeline
+        return pipeline if isinstance(pipeline, cls) else None
