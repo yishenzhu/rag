@@ -1,0 +1,17 @@
+"""Database repositories."""
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .models import ApiKey
+
+
+class ApiKeyRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_prefix(self, key_prefix: str) -> ApiKey | None:
+        result = await self.session.execute(
+            select(ApiKey).where(ApiKey.key_prefix == key_prefix)
+        )
+        return result.scalar_one_or_none()
