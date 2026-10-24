@@ -8,13 +8,13 @@ from rag.app.middleware import RequestContextMiddleware, get_context
 from rag.engine import RAGPipeline
 
 
-def _client(app: FastAPI) -> AsyncClient:
+def make_client(app: FastAPI) -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
 @pytest.mark.asyncio
 async def test_live_health_echoes_request_id():
-    async with _client(create_app()) as client:
+    async with make_client(create_app()) as client:
         response = await client.get(
             "/health/live", headers={"X-Request-Id": "test-123"}
         )
@@ -26,7 +26,7 @@ async def test_live_health_echoes_request_id():
 
 @pytest.mark.asyncio
 async def test_v1_health_alias_generates_request_id():
-    async with _client(create_app()) as client:
+    async with make_client(create_app()) as client:
         response = await client.get("/v1/health/live")
 
     assert response.status_code == 200
@@ -39,7 +39,7 @@ async def test_ready_when_pipeline_none_is_503():
     # 模拟 lifespan 初始化失败后的状态。
     app.state.pipeline = None
 
-    async with _client(app) as client:
+    async with make_client(app) as client:
         response = await client.get("/health/ready")
 
     assert response.status_code == 503
@@ -52,7 +52,7 @@ async def test_ready_with_pipeline_instance_is_200():
     # 只验证就绪状态，不构造 Qdrant/embedding 客户端。
     app.state.pipeline = object.__new__(RAGPipeline)
 
-    async with _client(app) as client:
+    async with make_client(app) as client:
         response = await client.get("/health/ready")
 
     assert response.status_code == 200
@@ -61,7 +61,7 @@ async def test_ready_with_pipeline_instance_is_200():
 
 @pytest.mark.asyncio
 async def test_legacy_router_is_mounted():
-    async with _client(create_app()) as client:
+    async with make_client(create_app()) as client:
         response = await client.get("/legacy/health")
 
     assert response.status_code == 200
@@ -77,7 +77,7 @@ async def test_request_context_is_visible_in_endpoint():
     async def ctx():
         return {"request_id": get_context().request_id}
 
-    async with _client(app) as client:
+    async with make_client(app) as client:
         response = await client.get("/ctx", headers={"X-Request-Id": "ctx-1"})
 
     assert response.json()["request_id"] == "ctx-1"

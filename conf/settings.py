@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     db_max_overflow: int = 20
     redis_url: str = "redis://localhost:6379/0"
     kafka_bootstrap_servers: str = "localhost:9092"
+    api_key_pepper: str = "dev-pepper-change-me"
 
 
 @lru_cache
