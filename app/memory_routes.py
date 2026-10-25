@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,3 +84,30 @@ async def create_memory(
             return MemoryResponse.model_validate(existing)
         raise HTTPException(409, "memory conflict") from None
     return MemoryResponse.model_validate(memory)
+
+
+@router.get("", response_model=list[MemoryResponse])
+async def list_memories(
+    principal: Annotated[AuthPrincipal, Depends(require_scope("memories:read"))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> list[MemoryResponse]:
+    records = await MemoryRepository(session).list_for_scope(
+        principal.tenant_id, principal.project_id, limit, offset
+    )
+    return [MemoryResponse.model_validate(record) for record in records]
+
+
+@router.get("/{memory_id}", response_model=MemoryResponse)
+async def get_memory(
+    memory_id: UUID,
+    principal: Annotated[AuthPrincipal, Depends(require_scope("memories:read"))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> MemoryResponse:
+    record = await MemoryRepository(session).get_for_scope(
+        memory_id, principal.tenant_id, principal.project_id
+    )
+    if record is None:
+        raise HTTPException(404, "memory not found")
+    return MemoryResponse.model_validate(record)

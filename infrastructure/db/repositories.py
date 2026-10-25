@@ -83,3 +83,32 @@ class MemoryRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def get_for_scope(
+        self, memory_id: UUID, tenant_id: UUID, project_id: UUID
+    ) -> Memory | None:
+        result = await self.session.execute(
+            select(Memory).where(
+                Memory.id == memory_id,
+                Memory.tenant_id == tenant_id,
+                Memory.project_id == project_id,
+                Memory.deleted_at.is_(None),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_for_scope(
+        self, tenant_id: UUID, project_id: UUID, limit: int, offset: int
+    ) -> list[Memory]:
+        result = await self.session.execute(
+            select(Memory)
+            .where(
+                Memory.tenant_id == tenant_id,
+                Memory.project_id == project_id,
+                Memory.deleted_at.is_(None),
+            )
+            .order_by(Memory.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().all())

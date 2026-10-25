@@ -5,8 +5,15 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 from rag.app.deps import AuthPrincipal
-from rag.app.memory_routes import CreateMemoryRequest, content_hash, create_memory
+from rag.app.memory_routes import (
+    CreateMemoryRequest,
+    content_hash,
+    create_memory,
+    get_memory,
+    list_memories,
+)
 from rag.infrastructure.db.models import Memory
 
 
@@ -84,3 +91,20 @@ async def test_create_and_dedupe_memory():
         CreateMemoryRequest(content="hello"), principal, FakeSession(one=existing)
     )
     assert deduped.id == existing.id
+
+
+@pytest.mark.asyncio
+async def test_list_and_get_memory():
+    principal = make_principal()
+    record = make_record(
+        tenant_id=principal.tenant_id, project_id=principal.project_id
+    )
+    listed = await list_memories(principal, FakeSession(many=[record]), 20, 0)
+    assert [item.id for item in listed] == [record.id]
+
+    fetched = await get_memory(record.id, principal, FakeSession(one=record))
+    assert fetched.id == record.id
+
+    with pytest.raises(HTTPException) as exc:
+        await get_memory(uuid4(), principal, FakeSession(one=None))
+    assert exc.value.status_code == 404
