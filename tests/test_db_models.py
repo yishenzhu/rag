@@ -22,6 +22,7 @@ def test_tables_registered():
         "projects",
         "api_keys",
         "memories",
+        "outbox",
     }
 
 
