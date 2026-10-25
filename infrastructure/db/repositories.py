@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import ApiKey, Membership, User
+from .models import ApiKey, Membership, Project, User
 
 
 class ApiKeyRepository:
@@ -51,5 +51,18 @@ class MembershipRepository:
     async def list_for_user(self, user_id: UUID) -> list[Membership]:
         result = await self.session.execute(
             select(Membership).where(Membership.user_id == user_id)
+        )
+        return list(result.scalars().all())
+
+
+class ProjectRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def list_for_tenant(self, tenant_id: UUID) -> list[Project]:
+        result = await self.session.execute(
+            select(Project)
+            .where(Project.tenant_id == tenant_id)
+            .order_by(Project.created_at.desc())
         )
         return list(result.scalars().all())

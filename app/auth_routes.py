@@ -1,6 +1,5 @@
 """JWT authentication routes."""
 
-import re
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -15,6 +14,7 @@ from ..infrastructure.db.models import Membership, Project, Tenant, User
 from ..infrastructure.db.repositories import MembershipRepository, UserRepository
 from ..security.auth import create_access_token, hash_password, verify_password
 from .deps import UserPrincipal, require_user
+from .slugs import make_slug
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 me_router = APIRouter(tags=["auth"])
@@ -75,11 +75,6 @@ async def resolve_membership(
     if not memberships:
         raise HTTPException(403, "no tenant membership")
     raise HTTPException(400, "tenant_id required")
-
-
-def make_slug(name: str) -> str:
-    base = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-") or "tenant"
-    return f"{base[:40]}-{uuid4().hex[:8]}"
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=201)
