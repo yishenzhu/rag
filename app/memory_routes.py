@@ -1,6 +1,7 @@
 """Memory routes."""
 
 import hashlib
+import logging
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID, uuid4
@@ -13,9 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..infrastructure.db.engine import get_session
 from ..infrastructure.db.models import Memory
 from ..infrastructure.db.repositories import MemoryRepository
-from .deps import AuthPrincipal, require_scope
+from ..infrastructure.vector.memory_index import MemoryIndex
+from .deps import AuthPrincipal, get_memory_index, require_scope
 
 router = APIRouter(prefix="/memories", tags=["memories"])
+logger = logging.getLogger(__name__)
 
 
 class CreateMemoryRequest(BaseModel):
@@ -59,6 +62,7 @@ async def create_memory(
     req: CreateMemoryRequest,
     principal: Annotated[AuthPrincipal, Depends(require_scope("memories:write"))],
     session: Annotated[AsyncSession, Depends(get_session)],
+    index: Annotated[MemoryIndex, Depends(get_memory_index)],
 ) -> MemoryResponse:
     repo = MemoryRepository(session)
     digest = content_hash(req.content)
@@ -91,6 +95,12 @@ async def create_memory(
         if existing is not None:
             return MemoryResponse.model_validate(existing)
         raise HTTPException(409, "memory conflict") from None
+    try:
+        await index.index(memory)
+        memory.qdrant_point_id = memory.id
+        await session.commit()
+    except Exception:
+        logger.exception("memory indexing failed: %s", memory.id)
     return MemoryResponse.model_validate(memory)
 
 

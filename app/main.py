@@ -12,6 +12,7 @@ from fastapi import FastAPI
 
 from ..core import Config, setup_logger
 from ..engine import RAGPipeline
+from ..infrastructure.vector.memory_index import MemoryIndex
 from ..routes import router as legacy_router
 from .api_key_routes import router as api_key_router
 from .auth_routes import me_router
@@ -33,13 +34,16 @@ def create_app() -> FastAPI:
         pipeline = None
         try:
             pipeline = await RAGPipeline(conf.rag).initialize()
-            # 初始化成功后再对外暴露，失败时 state.pipeline 保持 None。
             pipeline.bind_app(app)
-            logger.info("RAG pipeline initialized")
+            memory_index = MemoryIndex(pipeline.store, pipeline.embedding)
+            await memory_index.initialize()
+            app.state.memory_index = memory_index
+            logger.info("RAG pipeline and memory index initialized")
         except Exception:
             # 初始化失败时显式置 None -> readiness 503；
             # 属性缺失则代表未初始化/命名错误，直接抛错。
             app.state.pipeline = None
+            app.state.memory_index = None
             logger.exception("RAG pipeline initialization failed")
 
         try:

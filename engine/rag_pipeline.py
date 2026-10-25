@@ -33,6 +33,14 @@ class RAGPipeline:
         app.state.pipeline = self
         return self
 
+    @property
+    def store(self) -> AsyncQdrantClient:
+        return self._store
+
+    @property
+    def embedding(self) -> EmbeddingClient:
+        return self._embedding
+
     async def close(self):
         await asyncio.gather(
             self._embedding.aclose(),

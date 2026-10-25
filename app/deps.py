@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..conf import get_settings
 from ..infrastructure.db.engine import get_session
 from ..infrastructure.db.repositories import ApiKeyRepository, UserRepository
+from ..infrastructure.vector.memory_index import MemoryIndex
 from ..security.api_keys import ApiKeyError, has_scope, parse_api_key, verify_api_key
 from ..security.auth import TokenError, decode_access_token
 from .middleware import get_context
@@ -38,6 +39,13 @@ async def get_api_key_repository(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ApiKeyRepository:
     return ApiKeyRepository(session)
+
+
+def get_memory_index(request: Request) -> MemoryIndex:
+    index = getattr(request.app.state, "memory_index", None)
+    if index is None:
+        raise HTTPException(503, "memory index unavailable")
+    return index
 
 
 async def require_api_key(

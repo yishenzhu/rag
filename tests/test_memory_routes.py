@@ -71,14 +71,24 @@ def make_record(**overrides):
     return SimpleNamespace(**values)
 
 
+class FakeIndex:
+    def __init__(self):
+        self.indexed = []
+
+    async def index(self, memory):
+        self.indexed.append(memory)
+
+
 @pytest.mark.asyncio
 async def test_create_and_dedupe_memory():
     principal = make_principal()
     session = FakeSession()
+    index = FakeIndex()
     response = await create_memory(
         CreateMemoryRequest(content="hello", metadata={"topic": "x"}),
         principal,
         session,
+        index,
     )
 
     memory = session.added[0]
@@ -91,10 +101,14 @@ async def test_create_and_dedupe_memory():
         {"topic": "x"}, "active", "api"
     )
     assert response.id == memory.id and session.committed
+    assert index.indexed == [memory]
 
     existing = make_record(content="hello", memory_metadata={"topic": "x"})
     deduped = await create_memory(
-        CreateMemoryRequest(content="hello"), principal, FakeSession(one=existing)
+        CreateMemoryRequest(content="hello"),
+        principal,
+        FakeSession(one=existing),
+        FakeIndex(),
     )
     assert deduped.id == existing.id
 
