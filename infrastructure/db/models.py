@@ -1,4 +1,4 @@
-"""SQLAlchemy models for tenants, users, projects and API keys."""
+"""SQLAlchemy models for tenants, users, projects, API keys and memories."""
 
 from datetime import datetime
 from uuid import UUID
@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     String,
@@ -137,3 +138,72 @@ class ApiKey(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class Memory(Base):
+    __tablename__ = "memories"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'active', 'failed', 'deleted', 'expired')",
+            name="ck_memories_status",
+        ),
+        Index(
+            "ix_memories_tenant_project_created",
+            "tenant_id",
+            "project_id",
+            "created_at",
+        ),
+        Index(
+            "uq_memories_project_content",
+            "project_id",
+            "content_hash",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "ix_memories_external",
+            "project_id",
+            "external_id",
+            postgresql_where=text("external_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    external_id: Mapped[str | None] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    memory_metadata: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="active"
+    )
+    source: Mapped[str | None] = mapped_column(String(64))
+    embedding_model: Mapped[str | None] = mapped_column(String(128))
+    qdrant_point_id: Mapped[UUID | None] = mapped_column(Uuid)
+    importance: Mapped[float] = mapped_column(
+        Float, nullable=False, server_default=text("0.5")
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

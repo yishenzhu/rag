@@ -4,6 +4,7 @@ from rag.infrastructure.db.models import (
     ApiKey,
     Base,
     Membership,
+    Memory,
     Project,
     Tenant,
     User,
@@ -20,6 +21,7 @@ def test_tables_registered():
         "memberships",
         "projects",
         "api_keys",
+        "memories",
     }
 
 
@@ -50,7 +52,7 @@ def test_constraints_are_named():
 def test_ddl_compiles_for_postgres():
     ddl = "\n".join(
         str(CreateTable(table.__table__).compile(dialect=postgresql.dialect()))
-        for table in (Tenant, User, Membership, Project, ApiKey)
+        for table in (Tenant, User, Membership, Project, ApiKey, Memory)
     )
     assert "JSONB" in ddl
     assert "gen_random_uuid()" in ddl
