@@ -1,7 +1,6 @@
 """Memory routes."""
 
 import hashlib
-import logging
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID, uuid4
@@ -13,12 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..infrastructure.db.engine import get_session
 from ..infrastructure.db.models import Memory
+from ..infrastructure.db.outbox import (
+    enqueue_memory_delete,
+    enqueue_memory_ingest,
+)
 from ..infrastructure.db.repositories import MemoryRepository
 from ..infrastructure.vector.memory_index import MemoryIndex
 from .deps import AuthPrincipal, get_memory_index, require_scope
 
 router = APIRouter(prefix="/memories", tags=["memories"])
-logger = logging.getLogger(__name__)
 
 
 class CreateMemoryRequest(BaseModel):
@@ -74,7 +76,6 @@ async def create_memory(
     req: CreateMemoryRequest,
     principal: Annotated[AuthPrincipal, Depends(require_scope("memories:write"))],
     session: Annotated[AsyncSession, Depends(get_session)],
-    index: Annotated[MemoryIndex, Depends(get_memory_index)],
 ) -> MemoryResponse:
     repo = MemoryRepository(session)
     digest = content_hash(req.content)
@@ -91,7 +92,7 @@ async def create_memory(
         content=req.content,
         content_hash=digest,
         memory_metadata=req.metadata,
-        status="active",
+        status="pending",
         source="api",
         importance=0.5,
         expires_at=req.expires_at,
@@ -99,6 +100,7 @@ async def create_memory(
         updated_at=now,
     )
     session.add(memory)
+    enqueue_memory_ingest(session, memory, "memory.created")
     try:
         await session.commit()
     except IntegrityError:
@@ -107,12 +109,6 @@ async def create_memory(
         if existing is not None:
             return MemoryResponse.model_validate(existing)
         raise HTTPException(409, "memory conflict") from None
-    try:
-        await index.index(memory)
-        memory.qdrant_point_id = memory.id
-        await session.commit()
-    except Exception:
-        logger.exception("memory indexing failed: %s", memory.id)
     return MemoryResponse.model_validate(memory)
 
 
@@ -169,7 +165,6 @@ async def update_memory(
     req: UpdateMemoryRequest,
     principal: Annotated[AuthPrincipal, Depends(require_scope("memories:write"))],
     session: Annotated[AsyncSession, Depends(get_session)],
-    index: Annotated[MemoryIndex, Depends(get_memory_index)],
 ) -> MemoryResponse:
     repo = MemoryRepository(session)
     record = await repo.get_for_scope(
@@ -200,18 +195,15 @@ async def update_memory(
         record.expires_at = changes["expires_at"]
     if "importance" in changes and changes["importance"] is not None:
         record.importance = changes["importance"]
+    if "content" in changes or "metadata" in changes:
+        record.status = "pending"
+        enqueue_memory_ingest(session, record, "memory.updated")
     record.updated_at = datetime.now(UTC)
     try:
         await session.commit()
     except IntegrityError:
         await session.rollback()
         raise HTTPException(409, "duplicate memory") from None
-    try:
-        await index.index(record)
-        record.qdrant_point_id = record.id
-        await session.commit()
-    except Exception:
-        logger.exception("memory reindex failed: %s", record.id)
     return MemoryResponse.model_validate(record)
 
 
@@ -220,7 +212,6 @@ async def delete_memory(
     memory_id: UUID,
     principal: Annotated[AuthPrincipal, Depends(require_scope("memories:write"))],
     session: Annotated[AsyncSession, Depends(get_session)],
-    index: Annotated[MemoryIndex, Depends(get_memory_index)],
 ) -> None:
     record = await MemoryRepository(session).get_for_scope(
         memory_id, principal.tenant_id, principal.project_id
@@ -232,8 +223,5 @@ async def delete_memory(
     record.status = "deleted"
     record.deleted_at = now
     record.updated_at = now
+    enqueue_memory_delete(session, record)
     await session.commit()
-    try:
-        await index.delete(record.id)
-    except Exception:
-        logger.exception("memory vector delete failed: %s", record.id)

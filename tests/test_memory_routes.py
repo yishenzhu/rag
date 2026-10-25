@@ -19,7 +19,7 @@ from rag.app.memory_routes import (
     search_memories,
     update_memory,
 )
-from rag.infrastructure.db.models import Memory
+from rag.infrastructure.db.models import Memory, OutboxEvent
 from rag.infrastructure.vector.memory_index import MemoryHit
 
 
@@ -65,7 +65,8 @@ def make_principal(scopes=("memories:read", "memories:write")):
 def make_record(**overrides):
     values = {
         "id": uuid4(), "tenant_id": uuid4(), "project_id": uuid4(),
-        "external_id": None, "content": "hello", "memory_metadata": {},
+        "external_id": None, "content": "hello",
+        "content_hash": content_hash("hello"), "memory_metadata": {},
         "status": "active", "source": "api", "importance": 0.5,
         "expires_at": None, "created_at": datetime.now(UTC),
         "updated_at": datetime.now(UTC),
@@ -74,17 +75,13 @@ def make_record(**overrides):
     return SimpleNamespace(**values)
 
 
+def outbox_events(session):
+    return [obj for obj in session.added if isinstance(obj, OutboxEvent)]
+
+
 class FakeIndex:
     def __init__(self):
-        self.indexed = []
-        self.deleted = []
         self.hits = []
-
-    async def index(self, memory):
-        self.indexed.append(memory)
-
-    async def delete(self, memory_id):
-        self.deleted.append(memory_id)
 
     async def search(self, tenant_id, project_id, query, top_k):
         return self.hits
@@ -94,34 +91,36 @@ class FakeIndex:
 async def test_create_and_dedupe_memory():
     principal = make_principal()
     session = FakeSession()
-    index = FakeIndex()
     response = await create_memory(
         CreateMemoryRequest(content="hello", metadata={"topic": "x"}),
         principal,
         session,
-        index,
     )
 
-    memory = session.added[0]
-    assert isinstance(memory, Memory)
+    memory = next(obj for obj in session.added if isinstance(obj, Memory))
     assert (memory.tenant_id, memory.project_id) == (
         principal.tenant_id, principal.project_id
     )
     assert memory.content_hash == content_hash("hello")
     assert (memory.memory_metadata, memory.status, memory.source) == (
-        {"topic": "x"}, "active", "api"
+        {"topic": "x"}, "pending", "api"
     )
     assert response.id == memory.id and session.committed
-    assert index.indexed == [memory]
+
+    events = outbox_events(session)
+    assert len(events) == 1
+    assert (events[0].event_type, events[0].topic) == (
+        "memory.created", "memory.ingest.v1"
+    )
+    assert events[0].payload["memory_id"] == str(memory.id)
 
     existing = make_record(content="hello", memory_metadata={"topic": "x"})
+    dedup_session = FakeSession(one=existing)
     deduped = await create_memory(
-        CreateMemoryRequest(content="hello"),
-        principal,
-        FakeSession(one=existing),
-        FakeIndex(),
+        CreateMemoryRequest(content="hello"), principal, dedup_session
     )
     assert deduped.id == existing.id
+    assert not dedup_session.added
 
 
 @pytest.mark.asyncio
@@ -148,20 +147,21 @@ async def test_update_memory():
         tenant_id=principal.tenant_id, project_id=principal.project_id
     )
     session = FakeSession(results=[record, None])
-    index = FakeIndex()
     response = await update_memory(
         record.id,
         UpdateMemoryRequest(content="new content", metadata={"a": 1}),
         principal,
         session,
-        index,
     )
 
     assert response.content == "new content"
     assert record.content_hash == content_hash("new content")
     assert record.memory_metadata == {"a": 1}
+    assert record.status == "pending"
     assert session.committed
-    assert index.indexed == [record]
+
+    events = outbox_events(session)
+    assert events[0].event_type == "memory.updated"
 
     other = make_record()
     conflict = FakeSession(results=[record, other])
@@ -171,7 +171,6 @@ async def test_update_memory():
             UpdateMemoryRequest(content="other"),
             principal,
             conflict,
-            FakeIndex(),
         )
     assert exc.value.status_code == 409
 
@@ -183,15 +182,18 @@ async def test_delete_memory():
         tenant_id=principal.tenant_id, project_id=principal.project_id
     )
     session = FakeSession(one=record)
-    index = FakeIndex()
-    await delete_memory(record.id, principal, session, index)
+    await delete_memory(record.id, principal, session)
 
     assert record.status == "deleted" and record.deleted_at is not None
     assert session.committed
-    assert index.deleted == [record.id]
+
+    events = outbox_events(session)
+    assert (events[0].event_type, events[0].topic) == (
+        "memory.deleted", "memory.delete.v1"
+    )
 
     with pytest.raises(HTTPException) as exc:
-        await delete_memory(uuid4(), principal, FakeSession(one=None), FakeIndex())
+        await delete_memory(uuid4(), principal, FakeSession(one=None))
     assert exc.value.status_code == 404
 
 
