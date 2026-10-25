@@ -28,11 +28,20 @@ class FakeSession:
 @pytest.mark.asyncio
 async def test_require_user_and_me():
     user = SimpleNamespace(id=uuid4(), email="a@b.com", status="active")
-    token = create_access_token(user.id, user.email, get_settings().jwt_secret, 60)
-    assert await require_user(make_request(token), FakeSession(user)) is user
+    tenant_id = uuid4()
+    token = create_access_token(
+        user.id, user.email, tenant_id, "member", get_settings().jwt_secret, 60
+    )
+    principal = await require_user(make_request(token), FakeSession(user))
 
-    response = await me(user)
-    assert (response.id, response.email) == (user.id, user.email)
+    assert (
+        principal.user_id, principal.email, principal.tenant_id, principal.role
+    ) == (user.id, user.email, tenant_id, "member")
+
+    response = await me(principal)
+    assert (
+        response.id, response.email, response.tenant_id, response.role
+    ) == (user.id, user.email, tenant_id, "member")
 
 
 @pytest.mark.asyncio
@@ -44,7 +53,8 @@ async def test_require_user_rejects_invalid_tokens():
 
     disabled = SimpleNamespace(id=uuid4(), email="a@b.com", status="disabled")
     token = create_access_token(
-        disabled.id, disabled.email, get_settings().jwt_secret, 60
+        disabled.id, disabled.email, uuid4(), "member",
+        get_settings().jwt_secret, 60,
     )
     with pytest.raises(HTTPException):
         await require_user(make_request(token), FakeSession(disabled))

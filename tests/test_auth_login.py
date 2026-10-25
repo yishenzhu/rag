@@ -4,7 +4,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from rag.app.auth_routes import authenticate_user
+from fastapi import HTTPException
+from rag.app.auth_routes import authenticate_user, resolve_membership
 from rag.security.auth import (
     TokenError,
     create_access_token,
@@ -25,14 +26,17 @@ def test_password_hash_and_verify():
 
 def test_token_roundtrip_and_validation():
     user_id = uuid4()
-    token = create_access_token(user_id, "a@b.com", SECRET, 60)
+    tenant_id = uuid4()
+    token = create_access_token(user_id, "a@b.com", tenant_id, "owner", SECRET, 60)
     payload = decode_access_token(token, SECRET)
     assert payload.user_id == user_id
     assert payload.email == "a@b.com"
+    assert payload.tenant_id == tenant_id
+    assert payload.role == "owner"
 
     with pytest.raises(TokenError):
         decode_access_token(token, SECRET + "x")
-    expired = create_access_token(user_id, "a@b.com", SECRET, -1)
+    expired = create_access_token(user_id, "a@b.com", tenant_id, "owner", SECRET, -1)
     with pytest.raises(TokenError):
         decode_access_token(expired, SECRET)
 
@@ -63,3 +67,32 @@ async def test_authenticate_user():
         id=uuid4(), email="a@b.com", status="disabled", password_hash=hashed
     )
     assert await authenticate_user(FakeUserRepository(disabled), "a@b.com", "secret123") is None
+
+
+class FakeMembershipRepository:
+    def __init__(self, memberships):
+        self.memberships = memberships
+
+    async def list_for_user(self, user_id):
+        return self.memberships
+
+
+@pytest.mark.asyncio
+async def test_resolve_membership():
+    tenant_id = uuid4()
+    owner = SimpleNamespace(tenant_id=tenant_id, role="owner")
+    single = FakeMembershipRepository([owner])
+
+    assert await resolve_membership(single, uuid4(), None) is owner
+    assert await resolve_membership(single, uuid4(), tenant_id) is owner
+
+    with pytest.raises(HTTPException):
+        await resolve_membership(FakeMembershipRepository([]), uuid4(), None)
+    with pytest.raises(HTTPException):
+        await resolve_membership(single, uuid4(), uuid4())
+
+    member = SimpleNamespace(tenant_id=uuid4(), role="member")
+    multiple = FakeMembershipRepository([owner, member])
+    with pytest.raises(HTTPException):
+        await resolve_membership(multiple, uuid4(), None)
+    assert await resolve_membership(multiple, uuid4(), member.tenant_id) is member

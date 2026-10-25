@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..conf import get_settings
 from ..infrastructure.db.engine import get_session
-from ..infrastructure.db.models import User
 from ..infrastructure.db.repositories import ApiKeyRepository, UserRepository
 from ..security.api_keys import ApiKeyError, has_scope, parse_api_key, verify_api_key
 from ..security.auth import TokenError, decode_access_token
@@ -25,6 +24,14 @@ class AuthPrincipal:
     tenant_id: UUID
     project_id: UUID
     scopes: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class UserPrincipal:
+    user_id: UUID
+    email: str
+    tenant_id: UUID
+    role: str
 
 
 async def get_api_key_repository(
@@ -74,7 +81,7 @@ async def require_api_key(
 async def require_user(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> User:
+) -> UserPrincipal:
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
     token = token.strip()
     if scheme.lower() != "bearer" or not token:
@@ -90,9 +97,10 @@ async def require_user(
         raise HTTPException(401, "invalid token", headers=AUTH_HEADERS)
 
     ctx = get_context()
+    ctx.tenant_id = str(payload.tenant_id)
     ctx.actor_type = "user"
     ctx.actor_id = str(user.id)
-    return user
+    return UserPrincipal(user.id, user.email, payload.tenant_id, payload.role)
 
 
 def require_scope(required: str):

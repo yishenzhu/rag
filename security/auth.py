@@ -21,6 +21,8 @@ class TokenError(ValueError):
 class TokenPayload:
     user_id: UUID
     email: str
+    tenant_id: UUID
+    role: str
 
 
 def hash_password(password: str) -> str:
@@ -34,11 +36,20 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_access_token(user_id: UUID, email: str, secret: str, ttl_seconds: int) -> str:
+def create_access_token(
+    user_id: UUID,
+    email: str,
+    tenant_id: UUID,
+    role: str,
+    secret: str,
+    ttl_seconds: int,
+) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
         "email": email,
+        "tenant_id": str(tenant_id),
+        "role": role,
         "iat": now,
         "exp": now + timedelta(seconds=ttl_seconds),
         "jti": uuid4().hex,
@@ -50,8 +61,13 @@ def decode_access_token(token: str, secret: str) -> TokenPayload:
     try:
         payload = jwt.decode(
             token, secret, algorithms=[ALGORITHM],
-            options={"require": ["exp", "sub"]},
+            options={"require": ["exp", "sub", "tenant_id", "role"]},
         )
-        return TokenPayload(UUID(payload["sub"]), payload["email"])
+        return TokenPayload(
+            UUID(payload["sub"]),
+            payload["email"],
+            UUID(payload["tenant_id"]),
+            payload["role"],
+        )
     except (InvalidTokenError, KeyError, TypeError, ValueError) as exc:
         raise TokenError("invalid token") from exc
