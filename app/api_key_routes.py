@@ -94,3 +94,20 @@ async def list_api_keys(
         principal.tenant_id, project_id
     )
     return [ApiKeyResponse.model_validate(record) for record in records]
+
+
+@router.delete("/{key_id}", status_code=204)
+async def revoke_api_key(
+    key_id: UUID,
+    principal: Annotated[UserPrincipal, Depends(require_role("owner", "admin"))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    record = await ApiKeyRepository(session).get_for_tenant(
+        key_id, principal.tenant_id
+    )
+    if record is None:
+        raise HTTPException(404, "api key not found")
+
+    record.status = "revoked"
+    record.revoked_at = datetime.now(UTC)
+    await session.commit()

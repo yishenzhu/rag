@@ -5,14 +5,22 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
-from rag.app.api_key_routes import CreateApiKeyRequest, create_api_key, list_api_keys
+from rag.app.api_key_routes import (
+    CreateApiKeyRequest,
+    create_api_key,
+    list_api_keys,
+    revoke_api_key,
+)
 from rag.app.deps import UserPrincipal, require_role
 from rag.infrastructure.db.models import ApiKey
 
 
 class FakeResult:
-    def __init__(self, many=None):
-        self.many = many or []
+    def __init__(self, one=None, many=None):
+        self.one, self.many = one, many or []
+
+    def scalar_one_or_none(self):
+        return self.one
 
     def scalars(self):
         return self
@@ -22,9 +30,10 @@ class FakeResult:
 
 
 class FakeSession:
-    def __init__(self, project=None, many=None):
+    def __init__(self, project=None, many=None, one=None):
         self.project = project
         self.many = many
+        self.one = one
         self.added = []
         self.committed = False
 
@@ -32,7 +41,7 @@ class FakeSession:
         return self.project
 
     async def execute(self, stmt):
-        return FakeResult(self.many)
+        return FakeResult(self.one, self.many)
 
     def add(self, obj):
         self.added.append(obj)
@@ -69,6 +78,21 @@ async def test_create_and_list_api_key():
     assert session.committed
     listed = await list_api_keys(principal, FakeSession(many=[record]), None)
     assert (listed[0].id, listed[0].key_prefix) == (record.id, record.key_prefix)
+
+
+@pytest.mark.asyncio
+async def test_revoke_api_key():
+    principal = make_principal()
+    record = SimpleNamespace(id=uuid4(), status="active", revoked_at=None)
+    session = FakeSession(one=record)
+    await revoke_api_key(record.id, principal, session)
+
+    assert record.status == "revoked" and record.revoked_at is not None
+    assert session.committed
+
+    with pytest.raises(HTTPException) as exc:
+        await revoke_api_key(uuid4(), principal, FakeSession(one=None))
+    assert exc.value.status_code == 404
 
 
 @pytest.mark.asyncio
