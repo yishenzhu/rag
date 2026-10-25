@@ -9,15 +9,18 @@ from fastapi import HTTPException
 from rag.app.deps import AuthPrincipal
 from rag.app.memory_routes import (
     CreateMemoryRequest,
+    SearchMemoriesRequest,
     UpdateMemoryRequest,
     content_hash,
     create_memory,
     delete_memory,
     get_memory,
     list_memories,
+    search_memories,
     update_memory,
 )
 from rag.infrastructure.db.models import Memory
+from rag.infrastructure.vector.memory_index import MemoryHit
 
 
 class FakeResult:
@@ -74,9 +77,17 @@ def make_record(**overrides):
 class FakeIndex:
     def __init__(self):
         self.indexed = []
+        self.deleted = []
+        self.hits = []
 
     async def index(self, memory):
         self.indexed.append(memory)
+
+    async def delete(self, memory_id):
+        self.deleted.append(memory_id)
+
+    async def search(self, tenant_id, project_id, query, top_k):
+        return self.hits
 
 
 @pytest.mark.asyncio
@@ -137,23 +148,30 @@ async def test_update_memory():
         tenant_id=principal.tenant_id, project_id=principal.project_id
     )
     session = FakeSession(results=[record, None])
+    index = FakeIndex()
     response = await update_memory(
         record.id,
         UpdateMemoryRequest(content="new content", metadata={"a": 1}),
         principal,
         session,
+        index,
     )
 
     assert response.content == "new content"
     assert record.content_hash == content_hash("new content")
     assert record.memory_metadata == {"a": 1}
     assert session.committed
+    assert index.indexed == [record]
 
     other = make_record()
     conflict = FakeSession(results=[record, other])
     with pytest.raises(HTTPException) as exc:
         await update_memory(
-            record.id, UpdateMemoryRequest(content="other"), principal, conflict
+            record.id,
+            UpdateMemoryRequest(content="other"),
+            principal,
+            conflict,
+            FakeIndex(),
         )
     assert exc.value.status_code == 409
 
@@ -165,11 +183,28 @@ async def test_delete_memory():
         tenant_id=principal.tenant_id, project_id=principal.project_id
     )
     session = FakeSession(one=record)
-    await delete_memory(record.id, principal, session)
+    index = FakeIndex()
+    await delete_memory(record.id, principal, session, index)
 
     assert record.status == "deleted" and record.deleted_at is not None
     assert session.committed
+    assert index.deleted == [record.id]
 
     with pytest.raises(HTTPException) as exc:
-        await delete_memory(uuid4(), principal, FakeSession(one=None))
+        await delete_memory(uuid4(), principal, FakeSession(one=None), FakeIndex())
     assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_search_memories():
+    principal = make_principal()
+    hit = MemoryHit(uuid4(), "hello", {"topic": "x"}, 0.9)
+    index = FakeIndex()
+    index.hits = [hit]
+
+    results = await search_memories(
+        SearchMemoriesRequest(query="hello", top_k=5), principal, index
+    )
+    assert (results[0].id, results[0].content, results[0].score) == (
+        hit.memory_id, hit.content, hit.score
+    )

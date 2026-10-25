@@ -1,5 +1,6 @@
 """Qdrant-backed vector index for memories."""
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from qdrant_client import AsyncQdrantClient
@@ -10,6 +11,14 @@ from ..db.models import Memory
 
 COLLECTION = "memories_v1"
 VECTOR_NAME = "dense"
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryHit:
+    memory_id: UUID
+    content: str
+    metadata: dict
+    score: float
 
 
 class MemoryIndex:
@@ -69,3 +78,38 @@ class MemoryIndex:
             collection_name=self.collection,
             points_selector=qdrant.PointIdsList(points=[str(memory_id)]),
         )
+
+    async def search(
+        self, tenant_id: UUID, project_id: UUID, query: str, top_k: int
+    ) -> list[MemoryHit]:
+        dense, _ = await self.embedder.encode([query])
+        query_filter = qdrant.Filter(
+            must=[
+                qdrant.FieldCondition(
+                    key="tenant_id", match=qdrant.MatchValue(value=str(tenant_id))
+                ),
+                qdrant.FieldCondition(
+                    key="project_id", match=qdrant.MatchValue(value=str(project_id))
+                ),
+                qdrant.FieldCondition(
+                    key="status", match=qdrant.MatchValue(value="active")
+                ),
+            ]
+        )
+        response = await self.client.query_points(
+            collection_name=self.collection,
+            query=dense[0].tolist(),
+            using=VECTOR_NAME,
+            query_filter=query_filter,
+            limit=top_k,
+            with_payload=True,
+        )
+        return [
+            MemoryHit(
+                UUID(point.payload["memory_id"]),
+                point.payload["content"],
+                point.payload.get("metadata") or {},
+                point.score,
+            )
+            for point in response.points
+        ]

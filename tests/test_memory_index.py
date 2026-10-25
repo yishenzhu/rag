@@ -1,7 +1,7 @@
 """Memory vector index tests (fake embedding and Qdrant clients)."""
 
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import numpy as np
 import pytest
@@ -22,6 +22,7 @@ class FakeQdrant:
         self.indexes = []
         self.points = []
         self.deleted = []
+        self.query = None
 
     async def get_collections(self):
         return SimpleNamespace(collections=[])
@@ -37,6 +38,23 @@ class FakeQdrant:
 
     async def delete(self, collection_name, points_selector):
         self.deleted.append(points_selector)
+
+    async def query_points(
+        self, collection_name, query, using, query_filter, limit, with_payload
+    ):
+        self.query = (query, using, limit)
+        return SimpleNamespace(
+            points=[
+                SimpleNamespace(
+                    payload={
+                        "memory_id": "00000000-0000-0000-0000-000000000001",
+                        "content": "hello",
+                        "metadata": {"topic": "x"},
+                    },
+                    score=0.9,
+                )
+            ]
+        )
 
 
 def make_memory():
@@ -67,3 +85,9 @@ async def test_initialize_index_and_delete():
 
     await index.delete(memory.id)
     assert client.deleted
+
+    hits = await index.search(memory.tenant_id, memory.project_id, "hello", 5)
+    assert hits[0].memory_id == UUID("00000000-0000-0000-0000-000000000001")
+    assert hits[0].content == "hello"
+    assert hits[0].score == 0.9
+    assert client.query[1] == "dense"

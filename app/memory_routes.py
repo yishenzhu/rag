@@ -53,6 +53,18 @@ class MemoryResponse(BaseModel):
     updated_at: datetime
 
 
+class SearchMemoriesRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=2000)
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class MemorySearchResult(BaseModel):
+    id: UUID
+    content: str
+    metadata: dict
+    score: float
+
+
 def content_hash(content: str) -> str:
     return hashlib.sha256(content.encode()).hexdigest()
 
@@ -117,6 +129,26 @@ async def list_memories(
     return [MemoryResponse.model_validate(record) for record in records]
 
 
+@router.post("/search", response_model=list[MemorySearchResult])
+async def search_memories(
+    req: SearchMemoriesRequest,
+    principal: Annotated[AuthPrincipal, Depends(require_scope("memories:read"))],
+    index: Annotated[MemoryIndex, Depends(get_memory_index)],
+) -> list[MemorySearchResult]:
+    hits = await index.search(
+        principal.tenant_id, principal.project_id, req.query, req.top_k
+    )
+    return [
+        MemorySearchResult(
+            id=hit.memory_id,
+            content=hit.content,
+            metadata=hit.metadata,
+            score=hit.score,
+        )
+        for hit in hits
+    ]
+
+
 @router.get("/{memory_id}", response_model=MemoryResponse)
 async def get_memory(
     memory_id: UUID,
@@ -137,6 +169,7 @@ async def update_memory(
     req: UpdateMemoryRequest,
     principal: Annotated[AuthPrincipal, Depends(require_scope("memories:write"))],
     session: Annotated[AsyncSession, Depends(get_session)],
+    index: Annotated[MemoryIndex, Depends(get_memory_index)],
 ) -> MemoryResponse:
     repo = MemoryRepository(session)
     record = await repo.get_for_scope(
@@ -173,6 +206,12 @@ async def update_memory(
     except IntegrityError:
         await session.rollback()
         raise HTTPException(409, "duplicate memory") from None
+    try:
+        await index.index(record)
+        record.qdrant_point_id = record.id
+        await session.commit()
+    except Exception:
+        logger.exception("memory reindex failed: %s", record.id)
     return MemoryResponse.model_validate(record)
 
 
@@ -181,6 +220,7 @@ async def delete_memory(
     memory_id: UUID,
     principal: Annotated[AuthPrincipal, Depends(require_scope("memories:write"))],
     session: Annotated[AsyncSession, Depends(get_session)],
+    index: Annotated[MemoryIndex, Depends(get_memory_index)],
 ) -> None:
     record = await MemoryRepository(session).get_for_scope(
         memory_id, principal.tenant_id, principal.project_id
@@ -193,3 +233,7 @@ async def delete_memory(
     record.deleted_at = now
     record.updated_at = now
     await session.commit()
+    try:
+        await index.delete(record.id)
+    except Exception:
+        logger.exception("memory vector delete failed: %s", record.id)
