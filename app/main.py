@@ -17,6 +17,7 @@ from .api_key_routes import router as api_key_router
 from .auth_routes import me_router
 from .auth_routes import router as auth_router
 from .health import router as health_router
+from .memory_routes import router as memory_router
 from .middleware import RequestContextMiddleware
 from .project_routes import router as project_router
 
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(me_router, prefix="/v1")
     app.include_router(api_key_router, prefix="/v1")
     app.include_router(project_router, prefix="/v1")
+    app.include_router(memory_router, prefix="/v1")
     app.include_router(legacy_router, prefix="/legacy")
     return app
 

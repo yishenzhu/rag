@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import ApiKey, Membership, Project, User
+from .models import ApiKey, Membership, Memory, Project, User
 
 
 class ApiKeyRepository:
@@ -66,3 +66,20 @@ class ProjectRepository:
             .order_by(Project.created_at.desc())
         )
         return list(result.scalars().all())
+
+
+class MemoryRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_content_hash(
+        self, project_id: UUID, content_hash: str
+    ) -> Memory | None:
+        result = await self.session.execute(
+            select(Memory).where(
+                Memory.project_id == project_id,
+                Memory.content_hash == content_hash,
+                Memory.deleted_at.is_(None),
+            )
+        )
+        return result.scalar_one_or_none()
