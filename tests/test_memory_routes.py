@@ -9,10 +9,13 @@ from fastapi import HTTPException
 from rag.app.deps import AuthPrincipal
 from rag.app.memory_routes import (
     CreateMemoryRequest,
+    UpdateMemoryRequest,
     content_hash,
     create_memory,
+    delete_memory,
     get_memory,
     list_memories,
+    update_memory,
 )
 from rag.infrastructure.db.models import Memory
 
@@ -32,11 +35,14 @@ class FakeResult:
 
 
 class FakeSession:
-    def __init__(self, one=None, many=None):
+    def __init__(self, one=None, many=None, results=None):
         self.one, self.many = one, many
+        self.results = list(results or [])
         self.added, self.committed = [], False
 
     async def execute(self, stmt):
+        if self.results:
+            return FakeResult(self.results.pop(0))
         return FakeResult(self.one, self.many)
 
     def add(self, obj):
@@ -107,4 +113,49 @@ async def test_list_and_get_memory():
 
     with pytest.raises(HTTPException) as exc:
         await get_memory(uuid4(), principal, FakeSession(one=None))
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_memory():
+    principal = make_principal()
+    record = make_record(
+        tenant_id=principal.tenant_id, project_id=principal.project_id
+    )
+    session = FakeSession(results=[record, None])
+    response = await update_memory(
+        record.id,
+        UpdateMemoryRequest(content="new content", metadata={"a": 1}),
+        principal,
+        session,
+    )
+
+    assert response.content == "new content"
+    assert record.content_hash == content_hash("new content")
+    assert record.memory_metadata == {"a": 1}
+    assert session.committed
+
+    other = make_record()
+    conflict = FakeSession(results=[record, other])
+    with pytest.raises(HTTPException) as exc:
+        await update_memory(
+            record.id, UpdateMemoryRequest(content="other"), principal, conflict
+        )
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_delete_memory():
+    principal = make_principal()
+    record = make_record(
+        tenant_id=principal.tenant_id, project_id=principal.project_id
+    )
+    session = FakeSession(one=record)
+    await delete_memory(record.id, principal, session)
+
+    assert record.status == "deleted" and record.deleted_at is not None
+    assert session.committed
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_memory(uuid4(), principal, FakeSession(one=None))
     assert exc.value.status_code == 404

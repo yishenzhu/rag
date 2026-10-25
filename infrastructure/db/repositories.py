@@ -73,15 +73,19 @@ class MemoryRepository:
         self.session = session
 
     async def get_by_content_hash(
-        self, project_id: UUID, content_hash: str
+        self,
+        project_id: UUID,
+        content_hash: str,
+        exclude_id: UUID | None = None,
     ) -> Memory | None:
-        result = await self.session.execute(
-            select(Memory).where(
-                Memory.project_id == project_id,
-                Memory.content_hash == content_hash,
-                Memory.deleted_at.is_(None),
-            )
-        )
+        conditions = [
+            Memory.project_id == project_id,
+            Memory.content_hash == content_hash,
+            Memory.deleted_at.is_(None),
+        ]
+        if exclude_id is not None:
+            conditions.append(Memory.id != exclude_id)
+        result = await self.session.execute(select(Memory).where(*conditions))
         return result.scalar_one_or_none()
 
     async def get_for_scope(

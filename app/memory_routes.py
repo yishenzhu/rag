@@ -25,6 +25,14 @@ class CreateMemoryRequest(BaseModel):
     expires_at: datetime | None = None
 
 
+class UpdateMemoryRequest(BaseModel):
+    content: str | None = Field(default=None, min_length=1, max_length=20000)
+    metadata: dict | None = None
+    external_id: str | None = Field(default=None, max_length=255)
+    expires_at: datetime | None = None
+    importance: float | None = Field(default=None, ge=0, le=1)
+
+
 class MemoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -111,3 +119,67 @@ async def get_memory(
     if record is None:
         raise HTTPException(404, "memory not found")
     return MemoryResponse.model_validate(record)
+
+
+@router.patch("/{memory_id}", response_model=MemoryResponse)
+async def update_memory(
+    memory_id: UUID,
+    req: UpdateMemoryRequest,
+    principal: Annotated[AuthPrincipal, Depends(require_scope("memories:write"))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> MemoryResponse:
+    repo = MemoryRepository(session)
+    record = await repo.get_for_scope(
+        memory_id, principal.tenant_id, principal.project_id
+    )
+    if record is None:
+        raise HTTPException(404, "memory not found")
+
+    changes = req.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(400, "no fields to update")
+    if "content" in changes:
+        if changes["content"] is None:
+            raise HTTPException(400, "content cannot be null")
+        digest = content_hash(changes["content"])
+        existing = await repo.get_by_content_hash(
+            principal.project_id, digest, exclude_id=memory_id
+        )
+        if existing is not None:
+            raise HTTPException(409, "duplicate memory")
+        record.content = changes["content"]
+        record.content_hash = digest
+    if "metadata" in changes:
+        record.memory_metadata = changes["metadata"] or {}
+    if "external_id" in changes:
+        record.external_id = changes["external_id"]
+    if "expires_at" in changes:
+        record.expires_at = changes["expires_at"]
+    if "importance" in changes and changes["importance"] is not None:
+        record.importance = changes["importance"]
+    record.updated_at = datetime.now(UTC)
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(409, "duplicate memory") from None
+    return MemoryResponse.model_validate(record)
+
+
+@router.delete("/{memory_id}", status_code=204)
+async def delete_memory(
+    memory_id: UUID,
+    principal: Annotated[AuthPrincipal, Depends(require_scope("memories:write"))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    record = await MemoryRepository(session).get_for_scope(
+        memory_id, principal.tenant_id, principal.project_id
+    )
+    if record is None:
+        raise HTTPException(404, "memory not found")
+
+    now = datetime.now(UTC)
+    record.status = "deleted"
+    record.deleted_at = now
+    record.updated_at = now
+    await session.commit()
