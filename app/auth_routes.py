@@ -1,6 +1,7 @@
 """JWT login routes."""
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -8,10 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..conf import get_settings
 from ..infrastructure.db.engine import get_session
+from ..infrastructure.db.models import User
 from ..infrastructure.db.repositories import UserRepository
 from ..security.auth import create_access_token, verify_password
+from .deps import require_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+me_router = APIRouter(tags=["auth"])
 
 
 class LoginRequest(BaseModel):
@@ -23,6 +27,11 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+class UserResponse(BaseModel):
+    id: UUID
+    email: str
 
 
 async def authenticate_user(repo: UserRepository, email: str, password: str):
@@ -43,3 +52,8 @@ async def login(req: LoginRequest, session: Annotated[AsyncSession, Depends(get_
         user.id, user.email, settings.jwt_secret, settings.jwt_access_ttl_seconds
     )
     return TokenResponse(access_token=token, expires_in=settings.jwt_access_ttl_seconds)
+
+
+@me_router.get("/me", response_model=UserResponse)
+async def me(user: Annotated[User, Depends(require_user)]) -> UserResponse:
+    return UserResponse(id=user.id, email=user.email)

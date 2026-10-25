@@ -10,8 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..conf import get_settings
 from ..infrastructure.db.engine import get_session
-from ..infrastructure.db.repositories import ApiKeyRepository
+from ..infrastructure.db.models import User
+from ..infrastructure.db.repositories import ApiKeyRepository, UserRepository
 from ..security.api_keys import ApiKeyError, has_scope, parse_api_key, verify_api_key
+from ..security.auth import TokenError, decode_access_token
 from .middleware import get_context
 
 AUTH_HEADERS = {"WWW-Authenticate": "Bearer"}
@@ -67,6 +69,30 @@ async def require_api_key(
     ctx.actor_id = str(record.id)
     ctx.scopes = scopes
     return AuthPrincipal(record.id, record.tenant_id, record.project_id, scopes)
+
+
+async def require_user(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> User:
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    token = token.strip()
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(401, "missing bearer token", headers=AUTH_HEADERS)
+
+    try:
+        payload = decode_access_token(token, get_settings().jwt_secret)
+    except TokenError:
+        raise HTTPException(401, "invalid token", headers=AUTH_HEADERS) from None
+
+    user = await UserRepository(session).get_by_id(payload.user_id)
+    if user is None or user.status != "active":
+        raise HTTPException(401, "invalid token", headers=AUTH_HEADERS)
+
+    ctx = get_context()
+    ctx.actor_type = "user"
+    ctx.actor_id = str(user.id)
+    return user
 
 
 def require_scope(required: str):
