@@ -112,3 +112,14 @@ def require_scope(required: str):
         return principal
 
     return dependency
+
+
+def require_role(*allowed: str):
+    async def dependency(
+        principal: Annotated[UserPrincipal, Depends(require_user)],
+    ) -> UserPrincipal:
+        if principal.role not in allowed:
+            raise HTTPException(403, f"requires role: {', '.join(allowed)}")
+        return principal
+
+    return dependency

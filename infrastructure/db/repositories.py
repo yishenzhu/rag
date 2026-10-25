@@ -16,6 +16,15 @@ class ApiKeyRepository:
         result = await self.session.execute(select(ApiKey).where(ApiKey.key_prefix == key_prefix))
         return result.scalar_one_or_none()
 
+    async def list_for_tenant(
+        self, tenant_id: UUID, project_id: UUID | None = None
+    ) -> list[ApiKey]:
+        stmt = select(ApiKey).where(ApiKey.tenant_id == tenant_id)
+        if project_id is not None:
+            stmt = stmt.where(ApiKey.project_id == project_id)
+        result = await self.session.execute(stmt.order_by(ApiKey.created_at.desc()))
+        return list(result.scalars().all())
+
 
 class UserRepository:
     def __init__(self, session: AsyncSession) -> None:
