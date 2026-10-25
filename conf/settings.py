@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     kafka_bootstrap_servers: str = "localhost:9092"
     api_key_pepper: str = "dev-pepper-change-me"
+    jwt_secret: str = "dev-jwt-secret-change-me-0123456789abcdef"
+    jwt_access_ttl_seconds: int = 900
 
 
 @lru_cache

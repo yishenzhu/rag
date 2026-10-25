@@ -28,6 +28,9 @@ dependencies = [
     "asyncpg>=0.29.0",
     "alembic>=1.13.0",
 
+    # Auth
+    "pyjwt>=2.8.0", "argon2-cffi>=23.1.0",
+
     # Vector store
     "qdrant-client>=1.9.0",
 
