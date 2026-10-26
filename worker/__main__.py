@@ -8,7 +8,7 @@ from prometheus_client import start_http_server
 from qdrant_client import AsyncQdrantClient
 
 from ..conf import get_settings
-from ..core import Config
+from ..core import Config, setup_logger
 from ..embedding import EmbeddingClient
 from ..infrastructure.db.engine import dispose_engine, get_engine, get_session_factory
 from ..infrastructure.db.outbox import TOPIC_MEMORY_DELETE, TOPIC_MEMORY_INGEST
@@ -44,6 +44,7 @@ async def consume(consumer, session, index, producer) -> None:
 async def main() -> None:
     settings = get_settings()
     conf = Config.load()
+    setup_logger(conf.log)
     setup_tracing("rag-worker")
     instrument_engine(get_engine())
 
