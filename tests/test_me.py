@@ -14,7 +14,7 @@ from rag.security.auth import create_access_token
 
 def make_request(token):
     headers = {} if token is None else {"authorization": f"Bearer {token}"}
-    return SimpleNamespace(headers=headers)
+    return SimpleNamespace(headers=headers, state=SimpleNamespace())
 
 
 class FakeSession:

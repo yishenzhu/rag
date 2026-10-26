@@ -17,7 +17,7 @@ PEPPER = get_settings().api_key_pepper
 
 def make_request(token):
     headers = {} if token is None else {"authorization": f"Bearer {token}"}
-    return SimpleNamespace(headers=headers)
+    return SimpleNamespace(headers=headers, state=SimpleNamespace())
 
 
 def make_record(material, **overrides):
