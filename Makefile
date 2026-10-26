@@ -1,4 +1,4 @@
-.PHONY: up down logs migrate smoke
+.PHONY: up down logs migrate models smoke
 
 up:
 	docker compose up -d --build
@@ -11,6 +11,9 @@ logs:
 
 migrate:
 	docker compose run --rm migrate
+
+models:
+	docker compose --profile models up -d --build
 
 smoke:
 	PYTHONPATH=.. .venv/bin/python scripts/smoke.py

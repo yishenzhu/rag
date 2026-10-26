@@ -8,11 +8,11 @@ rag:
     port: 6333
 
   embedding:
-    host: "host.docker.internal"
+    host: "embedding"
     port: 8002
 
   rerank:
-    host: "host.docker.internal"
+    host: "rerank"
     port: 8003
 
 embedding:
