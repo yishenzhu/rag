@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     jwt_access_ttl_seconds: int = 900
     rate_limit_rate: int = 20
     rate_limit_burst: int = 40
+    monthly_request_quota: int = 100000
 
 
 @lru_cache

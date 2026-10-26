@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..conf import get_settings
 from ..infrastructure.cache.api_keys import ApiKeyCache
+from ..infrastructure.cache.quota import QuotaLimiter
 from ..infrastructure.cache.rate_limit import RateLimiter
 from ..infrastructure.db.engine import get_session
 from ..infrastructure.db.repositories import ApiKeyRepository, UserRepository
@@ -100,6 +101,14 @@ async def require_api_key(
                 429,
                 "rate limit exceeded",
                 headers={**AUTH_HEADERS, "Retry-After": "1"},
+            )
+        quota = QuotaLimiter(redis, settings.monthly_request_quota)
+        allowed, _ = await quota.consume(record.tenant_id)
+        if not allowed:
+            raise HTTPException(
+                429,
+                "monthly quota exceeded",
+                headers={**AUTH_HEADERS, "Retry-After": "3600"},
             )
 
     scopes = tuple(record.scopes or ())
