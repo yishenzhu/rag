@@ -100,6 +100,38 @@ class RagClient:
         self.token = data["access_token"]
         return data
 
+    async def me(self) -> dict[str, Any]:
+        return await self._request("GET", "/v1/me")
+
+    async def list_projects(self) -> list[dict[str, Any]]:
+        return await self._request("GET", "/v1/projects")
+
+    async def create_project(
+        self, name: str, slug: str | None = None
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"name": name}
+        if slug is not None:
+            payload["slug"] = slug
+        return await self._request("POST", "/v1/projects", json=payload)
+
+    async def create_api_key(
+        self, project_id: str, name: str, scopes: list[str]
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            "/v1/api-keys",
+            json={"project_id": project_id, "name": name, "scopes": scopes},
+        )
+
+    async def list_api_keys(
+        self, project_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        params = {"project_id": project_id} if project_id else None
+        return await self._request("GET", "/v1/api-keys", params=params)
+
+    async def revoke_api_key(self, key_id: str) -> None:
+        await self._request("DELETE", f"/v1/api-keys/{key_id}")
+
     async def create_memory(
         self,
         content: str,
@@ -130,5 +162,19 @@ class RagClient:
             "POST", "/v1/memories/search", json={"query": query, "top_k": top_k}
         )
 
+    async def get_memory(self, memory_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/v1/memories/{memory_id}")
+
+    async def update_memory(self, memory_id: str, **fields: Any) -> dict[str, Any]:
+        return await self._request("PATCH", f"/v1/memories/{memory_id}", json=fields)
+
     async def delete_memory(self, memory_id: str) -> None:
         await self._request("DELETE", f"/v1/memories/{memory_id}")
+
+    async def usage(
+        self, period: str | None = None, group_by: str = "day"
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"group_by": group_by}
+        if period is not None:
+            params["period"] = period
+        return await self._request("GET", "/v1/usage", params=params)
