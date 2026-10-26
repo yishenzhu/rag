@@ -4,13 +4,15 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..infrastructure.cache.usage_reconcile import UsageReconciler
 from ..infrastructure.db.engine import get_session
 from ..infrastructure.db.repositories import UsageRepository
-from .deps import UserPrincipal, require_user
+from .deps import UserPrincipal, get_redis, require_role, require_user
 
 router = APIRouter(prefix="/usage", tags=["usage"])
 
@@ -40,6 +42,14 @@ class UsageEventResponse(BaseModel):
     model: str | None
     period: str
     occurred_at: datetime
+
+
+class UsageReconcile(BaseModel):
+    tenant_id: UUID
+    period: str
+    redis: int | None
+    ledger: int
+    difference: int | None
 
 
 @router.get("", response_model=UsageSummary)
@@ -86,3 +96,19 @@ async def list_usage_events(
     return [
         UsageEventResponse.model_validate(record) for record in records
     ]
+
+
+@router.get("/reconcile", response_model=UsageReconcile)
+async def reconcile_usage(
+    principal: Annotated[UserPrincipal, Depends(require_role("owner", "admin"))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    redis: Annotated[Redis | None, Depends(get_redis)],
+    period: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}$")] = None,
+) -> UsageReconcile:
+    if redis is None:
+        raise HTTPException(503, "redis unavailable")
+    period = period or datetime.now(UTC).strftime("%Y-%m")
+    data = await UsageReconciler(redis, session).check(
+        principal.tenant_id, period
+    )
+    return UsageReconcile(**data)
