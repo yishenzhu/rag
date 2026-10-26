@@ -17,9 +17,15 @@ from ..core import Config, setup_logger
 from ..engine import RAGPipeline
 from ..infrastructure.cache.last_used import flush_forever
 from ..infrastructure.cache.usage_flush import flush_forever as usage_flush_forever
+from ..infrastructure.db.engine import get_engine
 from ..infrastructure.observability.metrics import (
     MetricsMiddleware,
     metrics_response,
+)
+from ..infrastructure.observability.tracing import (
+    instrument_engine,
+    instrument_fastapi,
+    setup_tracing,
 )
 from ..infrastructure.vector.memory_index import MemoryIndex
 from ..routes import router as legacy_router
@@ -39,10 +45,12 @@ def create_app() -> FastAPI:
     conf = Config.load()
     settings = get_settings()
     setup_logger(conf.log)
+    setup_tracing("rag-api")
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        instrument_engine(get_engine())
         pipeline = None
         try:
             pipeline = await RAGPipeline(conf.rag).initialize()
@@ -73,6 +81,7 @@ def create_app() -> FastAPI:
             await redis.aclose()
 
     app = FastAPI(title="RAG Service", version="2.0.0", lifespan=lifespan)
+    instrument_fastapi(app)
     app.state.redis = redis
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(MetricsMiddleware)

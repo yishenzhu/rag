@@ -117,6 +117,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       RAG_CONF: /srv/rag/conf/conf.docker.yaml
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
       postgres:
         condition: service_healthy
@@ -195,6 +196,15 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "9093:9093"
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4318:4318"
     restart: unless-stopped
 
   grafana:

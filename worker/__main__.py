@@ -10,9 +10,10 @@ from qdrant_client import AsyncQdrantClient
 from ..conf import get_settings
 from ..core import Config
 from ..embedding import EmbeddingClient
-from ..infrastructure.db.engine import dispose_engine, get_session_factory
+from ..infrastructure.db.engine import dispose_engine, get_engine, get_session_factory
 from ..infrastructure.db.outbox import TOPIC_MEMORY_DELETE, TOPIC_MEMORY_INGEST
 from ..infrastructure.observability.backlog import refresh_backlog_forever
+from ..infrastructure.observability.tracing import instrument_engine, setup_tracing
 from ..infrastructure.queue.consumer import MemoryConsumer
 from ..infrastructure.queue.kafka import KafkaProducer
 from ..infrastructure.queue.relay import OutboxRelay
@@ -43,6 +44,8 @@ async def consume(consumer, session, index, producer) -> None:
 async def main() -> None:
     settings = get_settings()
     conf = Config.load()
+    setup_tracing("rag-worker")
+    instrument_engine(get_engine())
 
     client = AsyncQdrantClient(host=conf.rag.qdrant.host, port=conf.rag.qdrant.port)
     embedder = EmbeddingClient(conf.rag.embedding.server)
