@@ -9,9 +9,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir \
+ARG PIP_INDEX_URL
+RUN pip install --no-cache-dir ${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL} \
     fastapi "uvicorn[standard]" pydantic pydantic-settings pyyaml \
-    qdrant-client httpx markitdown numpy "sqlalchemy[asyncio]" asyncpg alembic \
+    "qdrant-client>=1.10,<1.13" httpx markitdown numpy "sqlalchemy[asyncio]" asyncpg alembic \
     pyjwt argon2-cffi aiokafka redis prometheus-client \
     opentelemetry-sdk opentelemetry-exporter-otlp-proto-http \
     opentelemetry-instrumentation-fastapi opentelemetry-instrumentation-sqlalchemy \

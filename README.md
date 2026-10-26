@@ -122,7 +122,7 @@ python scripts/loadtest.py --requests 200 --concurrency 20
 
 ## 部署
 
-- Docker Compose 见上；镜像为 `Dockerfile`（API/worker）与 `Dockerfile.models`（embedding/rerank）。
+- Docker Compose 见上；镜像为 `Dockerfile`（API/worker）与 `Dockerfile.models`（embedding/rerank）。国内网络可用 `docker compose build --build-arg PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/` 加速依赖安装。
 - Kubernetes：`kubectl apply -f deploy/k8s/app.yaml`。先等待 `rag-migrate` Job 完成；`rag-worker` 保持单副本（usage flush 的 `lrange + ltrim` 非原子），配置与 Secret 需替换为真实值。
 
 ## 旧版 RAG 服务（Legacy）
