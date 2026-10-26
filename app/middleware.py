@@ -1,4 +1,4 @@
-"""Per-request context and X-Request-Id propagation."""
+"""Per-request context plus X-Request-Id / X-Trace-Id propagation."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from uuid import uuid4
 
+from opentelemetry import trace
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -32,6 +33,11 @@ def get_context() -> RequestContext:
     return context.get() or RequestContext(request_id="-")
 
 
+def current_trace_id() -> str | None:
+    span_context = trace.get_current_span().get_span_context()
+    return format(span_context.trace_id, "032x") if span_context.is_valid else None
+
+
 class RequestContextMiddleware:
     """Assign a request id and expose it via contextvar, request.state and header."""
 
@@ -50,7 +56,11 @@ class RequestContextMiddleware:
 
         async def send_with_request_id(message: Message) -> None:
             if message["type"] == "http.response.start":
-                MutableHeaders(scope=message)["X-Request-Id"] = request_id
+                headers = MutableHeaders(scope=message)
+                headers["X-Request-Id"] = request_id
+                trace_id = current_trace_id()
+                if trace_id is not None:
+                    headers["X-Trace-Id"] = trace_id
             await send(message)
 
         try:
