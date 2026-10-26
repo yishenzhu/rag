@@ -28,7 +28,7 @@ class UsageFlusher:
 
     async def flush(self) -> int:
         try:
-            raw = await self.redis.lrange(QUEUE_KEY, 0, self.batch_size - 1)
+            raw = await self.redis.lpop(QUEUE_KEY, self.batch_size)
         except RedisError:
             return 0
         if not raw:
@@ -48,11 +48,17 @@ class UsageFlusher:
                 "occurred_at": datetime.fromisoformat(event["occurred_at"]),
             })
 
-        await self.session.execute(
-            insert(UsageLedger).values(rows).on_conflict_do_nothing(index_elements=["event_id"])
-        )
-        await self.session.commit()
-        await self.redis.ltrim(QUEUE_KEY, len(raw), -1)
+        try:
+            await self.session.execute(
+                insert(UsageLedger).values(rows).on_conflict_do_nothing(index_elements=["event_id"])
+            )
+            await self.session.commit()
+        except Exception:
+            try:
+                await self.redis.lpush(QUEUE_KEY, *reversed(raw))
+            except RedisError:
+                logger.warning("usage batch requeue failed", exc_info=True)
+            raise
         return len(rows)
 
 
