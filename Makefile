@@ -1,4 +1,4 @@
-.PHONY: up down logs migrate models smoke
+.PHONY: up down logs migrate models smoke test loadtest
 
 up:
 	docker compose up -d --build
@@ -17,3 +17,9 @@ models:
 
 smoke:
 	PYTHONPATH=.. .venv/bin/python scripts/smoke.py
+
+test:
+	PYTHONPATH=.. .venv/bin/python -m pytest -q
+
+loadtest:
+	PYTHONPATH=.. .venv/bin/python scripts/loadtest.py

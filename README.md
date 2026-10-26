@@ -1,29 +1,139 @@
-# RAG Service
+# RAG Memory Platform
 
-基于 FastAPI 的 RAG（Retrieval-Augmented Generation）服务，包含知识库（KnowledgeBase）和记忆库（MemoryBank）两种向量存储。项目支持 Qdrant 向量库、Embedding 服务、Rerank 服务及 BEIR 数据集评测。Embedding 与 Rerank 均支持多模态（文本 + 图片统一向量空间）。
+面向 AI 应用的多租户记忆服务，同时保留了最初的 RAG 检索与评测能力（见文末 **旧版 RAG 服务**）。
+
+- **多租户**：`tenant → project → api_key` 三级隔离，服务端强制按租户/项目过滤，跨租户访问返回 404。
+- **控制面 / 数据面分离**：JWT 管理项目与 API Key；API Key（`sk_live_<prefix>_<secret>`，HMAC-SHA256 存储）调用记忆接口，按 scope 授权。
+- **异步索引**：写入先落 PostgreSQL + outbox，Relay 投递到 Kafka，worker 消费后写 Qdrant，at-least-once + 幂等消费。
+- **可靠性与限流**：HTTP 幂等键（命中重放首次响应）、Redis Lua 令牌桶限流、月度配额、用量账本与对账。
+- **可观测性**：Prometheus 指标（含 trace exemplar）、Grafana 看板、Alertmanager 告警、OpenTelemetry 链路、日志携带 trace_id。
+
+## 架构
+
+```
+client / SDK
+    │  Bearer JWT（控制面） / Bearer API Key（数据面）
+    ▼
+FastAPI api ──► PostgreSQL（租户/项目/Key/记忆/outbox/usage）
+    │              │
+    │              └──► outbox relay ──► Kafka ──► worker ──► Qdrant
+    ▼
+Redis（Key 缓存、限流、配额、幂等、last_used、用量缓冲）
+    │
+    └──► observability：Prometheus → Alertmanager / Grafana；OTLP → Jaeger
+```
 
 ## 目录结构
 
-- `main.py` - 启动 RAG API 服务
-- `mcp_server.py` - 启动 MCP Server
-- `conf/conf.yaml` - 服务配置
-- `engine/` - 核心业务逻辑：知识库、记忆库、向量集合与注册表、RAG 管道、chunker
-- `embedding/` - 多模态嵌入微服务（Qwen3-VL-Embedding / BGE-M3）
-- `rerank/` - 多模态重排微服务（Qwen3-VL-Reranker）
-- `eval/` - 评测与数据集导入工具
-  - `eval/base.py` - 评测抽象：`EvalDataset` / `Metric` 协议
-  - `eval/beir/` - BEIR 数据集与指标适配器
-  - `eval/lihua/` - LiHua-World 长上下文多跳检索端到端评测（评测框架 + 结果；数据集为公开语料不入库，见下方说明）
-- `vector_store/qdrant.py` - Qdrant 封装
-- `scripts/run.sh` - 统一启动/停止/重启/状态/日志管理脚本
-- `data/` - 评测结果与生成文件输出目录
-- `models/` - 本地模型文件
+- `app/` - API 路由、鉴权依赖、请求上下文与指标中间件
+- `security/` - API Key 生成/校验、JWT、argon2 密码
+- `infrastructure/db/` - SQLAlchemy 模型、仓库、引擎；`migrations/` 为 Alembic 迁移
+- `infrastructure/cache/` - Redis 限流、配额、幂等、用量缓冲/落账、last_used 回写
+- `infrastructure/queue/` - outbox relay、Kafka 生产/消费、重试与 DLQ
+- `infrastructure/vector/` - Qdrant 记忆索引
+- `infrastructure/observability/` - 指标、链路、积压采集
+- `worker/` - Relay + Consumer 后台进程（同时暴露 `/metrics`）
+- `sdk/` - 异步 Python 客户端
+- `observability/` - Prometheus 抓取/告警规则、Alertmanager、Grafana 数据源与看板
+- `deploy/k8s/` - Kubernetes 部署清单
+- `scripts/` - `smoke.py` 端到端自检、`loadtest.py` 压测
+- `engine/`、`embedding/`、`rerank/`、`eval/`、`vector_store/`、`routes/`、`main.py`、`mcp_server.py` - 旧版 RAG 能力（仍可用，见文末）
 
-## 快速开始
+## 快速开始（Docker Compose）
+
+```bash
+docker compose up -d --build          # api、worker、postgres、redis、qdrant、kafka、迁移
+docker compose --profile models up -d # 可选：本地 embedding/rerank（需 GPU 与 models/ 下的模型）
+```
+
+`migrate` 服务会在 api 启动前自动执行 `alembic upgrade head`。没有启动 embedding 服务时，新记忆会停留在 `pending`，不会完成索引。
+
+| 服务 | 地址 | 说明 |
+| --- | --- | --- |
+| API | http://localhost:8001 | `/docs` 查看 OpenAPI |
+| Prometheus | http://localhost:9090 | 告警状态见 `/alerts` |
+| Alertmanager | http://localhost:9093 | 分组、抑制、静默 |
+| Grafana | http://localhost:3000 | admin/admin，看板在 `RAG` 目录 |
+| Jaeger | http://localhost:16686 | trace 查询，服务名 `rag-api` / `rag-worker` |
+| Embedding / Rerank | 8002 / 8003 | 需 `models` profile |
+| Qdrant / Kafka / Redis / PostgreSQL | 6333 / 9092 / 6379 / 5432 | |
+
+## API 一览
+
+| 方法 | 路径 | 鉴权 | 说明 |
+| --- | --- | --- | --- |
+| POST | `/v1/auth/register` | 无 | 注册用户 + 租户 + 默认项目 |
+| POST | `/v1/auth/login` | 无 | 获取 JWT |
+| GET | `/v1/me` | JWT | 当前用户 |
+| GET/POST | `/v1/projects` | JWT | 项目列表 / 新建（owner、admin） |
+| POST/GET/DELETE | `/v1/api-keys` | JWT | 创建（返回一次明文 Key）/ 列表 / 吊销 |
+| POST | `/v1/memories` | API Key `memories:write` | 支持 `Idempotency-Key`，命中时重放首次响应 |
+| GET | `/v1/memories` | API Key `memories:read` | `limit` / `offset` 分页 |
+| POST | `/v1/memories/search` | API Key `memories:read` | 语义检索 `query` / `top_k` |
+| GET/PATCH/DELETE | `/v1/memories/{id}` | API Key | 读取 / 更新（重新索引）/ 软删除 |
+| GET | `/v1/usage`、`/v1/usage/events`、`/v1/usage/reconcile` | JWT | 用量聚合、明细、Redis 与账本对账 |
+| GET | `/health/live`、`/health/ready` | 无 | 存活 / 就绪（依赖未初始化时 503） |
+| GET | `/metrics` | 无 | Prometheus/OpenMetrics，建议只在集群内暴露 |
+
+## SDK
+
+```python
+import asyncio
+from rag.sdk import RagClient
+
+async def main() -> None:
+    async with RagClient("http://localhost:8001") as client:
+        reg = await client.register("dev@example.com", "secret123", "Acme")
+        key = await client.create_api_key(
+            reg["project_id"], "backend", ["memories:read", "memories:write"]
+        )
+        client.api_key, client.token = key["key"], None
+
+        memory = await client.create_memory(
+            "用户偏好深色主题", idempotency_key="pref-1"
+        )
+        hits = await client.search_memories("主题偏好", top_k=3)
+        print(memory["id"], len(hits))
+
+asyncio.run(main())
+```
+
+失败时抛出 `ApiError`，带 `status_code`、`detail`、`request_id`、`trace_id`。
+
+## 可观测性
+
+- 指标：`http_requests_total` / `http_request_duration_seconds`（含 `tenant` 标签与 trace exemplar）、限流/配额拒绝、鉴权失败、outbox 积压与最老等待时长、记忆按状态计数。
+- 租户标签默认折叠为 `other`；需要按租户拆分时设置 `METRICS_TENANT_ALLOWLIST=<id1>,<id2>`（白名单控制基数）。
+- 链路：设置 `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318` 启用；响应头返回 `X-Trace-Id`，日志每行包含 trace_id。
+- 告警：API 5xx 比例 / P95 / 鉴权失败突增，outbox 积压与投递失败、用量落账失败、pending 记忆过多；Alertmanager 对同 job 做告警抑制，接收器默认为空，需按 `observability/alertmanager.yml` 注释接入 webhook。
+
+## 测试与压测
+
+```bash
+source .venv/bin/activate
+PYTHONPATH=.. python -m pytest -q     # 单元/契约测试（不需要外部服务）
+ruff check .
+
+python scripts/smoke.py               # 对运行中的 API 跑完整流程
+python scripts/loadtest.py --requests 200 --concurrency 20
+```
+
+等价的 `make test` / `make smoke` / `make loadtest` 也已配置。
+
+## 部署
+
+- Docker Compose 见上；镜像为 `Dockerfile`（API/worker）与 `Dockerfile.models`（embedding/rerank）。
+- Kubernetes：`kubectl apply -f deploy/k8s/app.yaml`。先等待 `rag-migrate` Job 完成；`rag-worker` 保持单副本（usage flush 的 `lrange + ltrim` 非原子），配置与 Secret 需替换为真实值。
+
+## 旧版 RAG 服务（Legacy）
+
+> 以下描述改造前的单租户 RAG 与评测能力，代码仍在仓库中，旧路由挂载在 `/legacy` 下。
+
+### 快速开始（旧）
 
 > 以下命令均在**项目根目录**下执行（项目根目录即 `rag` 包的根，`main.py`、`scripts/`、`eval/` 等都在此目录下）。
 
-### 1. 安装依赖
+#### 1. 安装依赖
 
 ```bash
 python -m venv .venv
@@ -33,7 +143,7 @@ pip install -e .
 
 > 项目依赖定义在 `pyproject.toml`，包括 `fastapi`、`qdrant-client`、`httpx`、`beir`、`matplotlib`，以及多模态所需的 `transformers`、`accelerate`、`bitsandbytes`。
 
-### 2. 启动服务
+#### 2. 启动服务
 
 使用项目自带管理脚本：
 
@@ -50,16 +160,16 @@ pip install -e .
 - `./scripts/run.sh status`：查看各服务 PID、端口与就绪状态
 - `./scripts/run.sh logs api`：跟踪单个服务日志（`qdrant` / `embedding` / `rerank` / `mcp` 同理）
 
-### 3. API 地址
+#### 3. API 地址
 
 - RAG API: `http://localhost:8001`
 - MCP Server: `http://localhost:9000`
 - Embedding 服务: `http://localhost:8002`
 - Rerank 服务: `http://localhost:8003`
 
-## 使用说明
+### 使用说明
 
-### 创建/列出知识库
+#### 创建/列出知识库
 
 - 创建 collection：
 
@@ -81,7 +191,7 @@ curl http://localhost:8001/knowledge
 > 启动时只有 id 与当前配置一致、且维度匹配的集合会标记为 active；其余标记为 inactive，
 > 不阻断服务启动。`GET /knowledge?include_inactive=true` 可查看未激活原因。
 
-### 导入文档 / BEIR 数据集
+#### 导入文档 / BEIR 数据集
 
 直接调用导入脚本（`rag` 包即项目根目录本身，`python -m rag.*` 需在项目根下把**上一级**目录加入搜索路径）：
 
@@ -96,7 +206,7 @@ PYTHONPATH=.. python -m rag.eval.ingest <source-path> -c <collection>
 python -m rag.eval.ingest --dataset-name scifact -c scifact
 ```
 
-### 检索查询
+#### 检索查询
 
 发送 search 请求：
 
@@ -113,7 +223,7 @@ curl -X POST http://localhost:8001/knowledge/search \
   }'
 ```
 
-## 多模态
+### 多模态
 
 Embedding 与 Rerank 服务均支持文本与图片映射到**同一向量空间**，因此文本查询可以检索图片。开关在 `conf/conf.yaml`：
 
@@ -130,7 +240,7 @@ rerank:
 
 > **注意**：Qwen3-VL-Embedding **不产出稀疏向量**，因此多模态后端下 `hybrid` 会静默退化为纯 dense 检索（不报错）。需要稀疏检索时请把 embedding 切回 `BGE-M3`（`multimodal: false`）。切换模型后向量维度会变化（Qwen3-VL 为 2048，BGE-M3 为 1024），需重建 collection。
 
-### 导入图片
+#### 导入图片
 
 `/knowledge/ingest` 的 `documents` 为多态数组，文本与图片可混在一起：
 
@@ -151,7 +261,7 @@ curl -X POST http://localhost:8001/knowledge/ingest \
 - 图片的 `url` 与 `path` **必须且仅有一个**非空；`path` 为**服务端本机**可读路径。
 - 分块（`chunk_size` / `chunker_type`）**仅作用于文本文档**，图片始终整条入库、不切分。
 
-### 检索（含图片结果）
+#### 检索（含图片结果）
 
 `queries` 目前为纯文本列表（图片作为**检索结果**返回，暂不支持以图搜图）：
 
@@ -170,7 +280,7 @@ curl -X POST http://localhost:8001/knowledge/search \
 
 多模态 rerank 的分组约定：每个 query 的候选按**文本在前、图片在后**拼接，返回的分数与这个顺序一一对应。
 
-## 评测
+### 评测
 
 项目基于 [BEIR](https://github.com/beir-cellar/beir) 评测流程。示例（在项目根目录下）：
 
@@ -186,7 +296,7 @@ PYTHONPATH=.. python -m rag.eval eval --dataset-name scifact --collection scifac
 - `scifact_scifact_hybrid_no_rerank_<timestamp>.json`
 - `scifact_scifact_hybrid_rerank_<timestamp>.json`
 
-### 绘图
+#### 绘图
 
 评测完成后，可使用 plot 功能生成对比图：
 
@@ -197,7 +307,7 @@ PYTHONPATH=.. python -m rag.eval plot data/<report1>.json data/<report2>.json ..
 
 生成的 PNG 文件会保存到 `data/`。
 
-### 评测结果（SciFact，300 查询 / 5183 文档）
+#### 评测结果（SciFact，300 查询 / 5183 文档）
 
 > ⚠️ 下表为 **2026-07-29 的旧结果**，当时使用 BGE-M3（embedding）+ ms-marco-MiniLM-L6-v2（rerank）纯文本后端。切换至 Qwen3-VL 多模态模型后**尚未重新评测**，数值不可直接对应当前默认配置；下表仅作为历史基线与流程示例。
 
@@ -216,7 +326,7 @@ PYTHONPATH=.. python -m rag.eval plot data/<report1>.json data/<report2>.json ..
 
 > 小结：rerank 明显提升 precision 类指标（NDCG@1 / MAP@1）；hybrid 在召回率（Recall@10 / Recall@100）上优于纯 dense。
 
-### 评测结果（LiHua-World 端到端评测，Agent 多轮检索）
+#### 评测结果（LiHua-World 端到端评测，Agent 多轮检索）
 
 除单次检索的 BEIR 式评测外，项目还实现了 **LLM-Agent 驱动的端到端检索评测**（`eval/lihua/`），验证"LLM 自主规划查询 → 调用 RAG MCP 工具 → 多轮收敛 → 生成答案"的完整链路。
 
@@ -277,14 +387,14 @@ Agent 通过多轮检索把证据累积召回率从基线的 76.7% 提升到 **8
 - `lihua_direct_top5_report.json` — Direct 全量 637 题基线报告（非 1/10 抽样，仅作语料整体基线参考）
 - `lihua_direct_top5_sample01_agg.json` — 同 1/10 子集（64 题）Direct 对照聚合，用于与 Agent 逐项对比
 
-## 运行环境
+### 运行环境
 
 - Python 3.11+
 - Qdrant (通过 Docker 启动)
 - 本地模型文件存放在 `models/`，多模态模式需 `Qwen3-VL-Embedding-2B` 与 `Qwen3-VL-Reranker-2B`
 - 多模态模型以 int8 量化加载，需 `bitsandbytes` 与 CUDA GPU（CPU 下可运行但极慢）
 
-## 注意事项
+### 注意事项
 
 - `python -m rag.*` 入口需要 `rag` 包可被 Python 找到：项目根目录即 `rag` 包本身，故需在项目根目录下运行并把**上一级**目录加入搜索路径（`PYTHONPATH=..`）。完成 `pip install -e .` 后包已注册到虚拟环境，可省略该设置。
 - Qdrant collection 在服务端实际存储时使用命名空间前缀，例如 `KnowledgeBase.scifact`。
@@ -292,7 +402,7 @@ Agent 通过多轮检索把证据累积召回率从基线的 76.7% 提升到 **8
 - **切换 embedding 模型（BGE-M3 ↔ Qwen3-VL）会改变向量维度**（1024 ↔ 2048），已有 collection 会因维度不匹配导致服务启动失败，需删除并重建。
 - 多模态 embedding 后端下 `hybrid` 无效（不产稀疏向量），会静默退化为纯 dense。
 
-## 开发
+### 开发
 
 项目已配置 `README.md` 为 `pyproject.toml` 的默认 README 文件。可通过 `pytest` 执行开发测试，`ruff` 进行静态检查。
 
