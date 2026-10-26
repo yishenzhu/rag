@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     api_key_pepper: str = "dev-pepper-change-me"
     jwt_secret: str = "dev-jwt-secret-change-me-0123456789abcdef"
     jwt_access_ttl_seconds: int = 900
+    rate_limit_rate: int = 20
+    rate_limit_burst: int = 40
 
 
 @lru_cache

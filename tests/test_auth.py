@@ -48,9 +48,12 @@ async def authenticate(token, record):
 
 
 class CacheRedis:
-    def __init__(self): self.data = {}
+    def __init__(self, allowed=True):
+        self.data = {}
+        self.allowed = allowed
     async def get(self, key): return self.data.get(key)
     async def set(self, key, value, ex=None): self.data[key] = value
+    async def eval(self, script, numkeys, *args): return [1 if self.allowed else 0, 1]
 
 
 class NoDatabase:
@@ -65,6 +68,18 @@ async def test_require_api_key_uses_cache():
     await ApiKeyCache(redis).set(record)
     principal = await require_api_key(make_request(material.plaintext), NoDatabase(), redis)
     assert principal.api_key_id == record.id
+
+
+@pytest.mark.asyncio
+async def test_require_api_key_rate_limited():
+    material = generate_api_key(PEPPER)
+    record = make_record(material)
+    redis = CacheRedis(allowed=False)
+    await ApiKeyCache(redis).set(record)
+
+    with pytest.raises(HTTPException) as exc:
+        await require_api_key(make_request(material.plaintext), NoDatabase(), redis)
+    assert exc.value.status_code == 429
 
 
 @pytest.mark.asyncio

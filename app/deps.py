@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..conf import get_settings
 from ..infrastructure.cache.api_keys import ApiKeyCache
+from ..infrastructure.cache.rate_limit import RateLimiter
 from ..infrastructure.db.engine import get_session
 from ..infrastructure.db.repositories import ApiKeyRepository, UserRepository
 from ..infrastructure.vector.memory_index import MemoryIndex
@@ -75,8 +76,9 @@ async def require_api_key(
         record = await repo.get_by_prefix(parsed.key_prefix)
         if record is not None and cache is not None:
             await cache.set(record)
+    settings = get_settings()
     if record is None or not verify_api_key(
-        token, record.key_hash, get_settings().api_key_pepper
+        token, record.key_hash, settings.api_key_pepper
     ):
         raise HTTPException(401, "invalid api key", headers=AUTH_HEADERS)
 
@@ -87,6 +89,18 @@ async def require_api_key(
         or (record.expires_at is not None and record.expires_at <= now)
     ):
         raise HTTPException(401, "api key inactive or expired", headers=AUTH_HEADERS)
+
+    if redis is not None:
+        limiter = RateLimiter(
+            redis, settings.rate_limit_rate, settings.rate_limit_burst
+        )
+        allowed, _ = await limiter.allow(f"key:{record.id}")
+        if not allowed:
+            raise HTTPException(
+                429,
+                "rate limit exceeded",
+                headers={**AUTH_HEADERS, "Retry-After": "1"},
+            )
 
     scopes = tuple(record.scopes or ())
     ctx = get_context()
