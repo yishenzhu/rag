@@ -1,7 +1,9 @@
 """Prometheus metrics tests."""
 
+from types import SimpleNamespace
+
 import pytest
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from opentelemetry.sdk.trace import TracerProvider
@@ -9,7 +11,7 @@ from prometheus_client import REGISTRY
 from prometheus_client.openmetrics.exposition import generate_latest
 from rag.app.main import create_app
 from rag.infrastructure.observability import metrics
-from rag.infrastructure.observability.metrics import MetricsMiddleware
+from rag.infrastructure.observability.metrics import MetricsMiddleware, route_label
 
 
 def test_metrics_middleware_records_request():
@@ -88,7 +90,13 @@ async def test_http_metrics_use_allowlisted_tenant(monkeypatch):
         pass
 
     await MetricsMiddleware(app)(
-        {"type": "http", "method": "GET", "path": "/tenant-metric", "headers": []},
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/tenant-metric",
+            "headers": [],
+            "route": SimpleNamespace(path="/tenant-metric"),
+        },
         receive,
         send,
     )
@@ -99,6 +107,39 @@ async def test_http_metrics_use_allowlisted_tenant(monkeypatch):
             "route": "/tenant-metric",
             "status": "200",
             "tenant": "tenant-a",
+        },
+    )
+    assert value == 1
+
+
+def test_route_label_includes_include_prefix():
+    scope = {
+        "path": "/v1/memories/abc",
+        "route": SimpleNamespace(path="/memories/{memory_id}"),
+    }
+    assert route_label(scope) == "/v1/memories/{memory_id}"
+    assert route_label({"path": "/nope"}) == "unmatched"
+
+
+def test_metrics_middleware_labels_include_prefix():
+    app = FastAPI()
+    app.add_middleware(MetricsMiddleware)
+    router = APIRouter(prefix="/items")
+
+    @router.get("/{item_id}")
+    def get_item(item_id: str):
+        return {"id": item_id}
+
+    app.include_router(router, prefix="/v1")
+    TestClient(app).get("/v1/items/42")
+
+    value = REGISTRY.get_sample_value(
+        "http_requests_total",
+        {
+            "method": "GET",
+            "route": "/v1/items/{item_id}",
+            "status": "200",
+            "tenant": "other",
         },
     )
     assert value == 1

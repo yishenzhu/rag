@@ -1,6 +1,7 @@
 """Prometheus metrics and ASGI instrumentation."""
 
 import os
+import re
 import time
 
 from fastapi import Response
@@ -23,6 +24,27 @@ def tenant_label(tenant_id: str | None) -> str:
     if tenant_id and str(tenant_id) in MONITORED_TENANTS:
         return str(tenant_id)
     return "other"
+
+
+ROUTE_PARAM = re.compile(r"\\?\{[^/}]+\\?\}")
+
+
+def route_label(scope: Scope) -> str:
+    """Return the route template with the include prefix (e.g. /v1/memories/{id}).
+
+    The router stores paths without their include prefix, so the prefix is
+    recovered from the tail match against the actual request path.
+    """
+    route = scope.get("route")
+    template = getattr(route, "path", None)
+    if template is None:
+        return "unmatched"
+    path = scope.get("path", "")
+    pattern = ROUTE_PARAM.sub("[^/]+", re.escape(template)) + "$"
+    match = re.search(pattern, path)
+    if match is None:
+        return template
+    return path[: match.start()] + template
 
 
 HTTP_REQUESTS = Counter(
@@ -102,8 +124,7 @@ class MetricsMiddleware:
         try:
             await self.app(scope, receive, send_wrapper)
         finally:
-            route = scope.get("route")
-            path = getattr(route, "path", None) or scope.get("path", "unknown")
+            path = route_label(scope)
             method = scope.get("method", "UNKNOWN")
             tenant = tenant_label(scope.get("state", {}).get("tenant_id"))
             exemplar = {"trace_id": trace_id} if trace_id else None
