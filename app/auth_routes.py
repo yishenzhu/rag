@@ -108,8 +108,11 @@ async def register(
         slug="default",
         settings={},
     )
-    session.add_all([user, tenant, membership, project])
+    session.add_all([user, tenant])
     try:
+        # 无 relationship 时 SQLAlchemy 不保证跨表插入顺序，先落父表再落子表。
+        await session.flush()
+        session.add_all([membership, project])
         await session.commit()
     except IntegrityError:
         await session.rollback()

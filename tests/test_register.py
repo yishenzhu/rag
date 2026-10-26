@@ -23,6 +23,7 @@ class FakeSession:
     def __init__(self, existing_user=None):
         self.existing_user = existing_user
         self.added = []
+        self.events = []
         self.committed = False
 
     async def execute(self, stmt):
@@ -30,9 +31,14 @@ class FakeSession:
 
     def add_all(self, objects):
         self.added.extend(objects)
+        self.events.extend(type(obj).__name__ for obj in objects)
+
+    async def flush(self):
+        self.events.append("flush")
 
     async def commit(self):
         self.committed = True
+        self.events.append("commit")
 
     async def rollback(self):
         pass
@@ -78,3 +84,21 @@ async def test_register_rejects_duplicate_email():
 
     assert exc.value.status_code == 409
     assert not session.added
+
+
+@pytest.mark.asyncio
+async def test_register_flushes_parent_rows_before_children():
+    session = FakeSession()
+    await register(
+        RegisterRequest(email="a@b.com", password="secret123", tenant_name="Acme"),
+        session,
+    )
+
+    assert session.events == [
+        "User",
+        "Tenant",
+        "flush",
+        "Membership",
+        "Project",
+        "commit",
+    ]
