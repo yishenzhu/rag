@@ -2,10 +2,10 @@
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import ApiKey, Membership, Memory, Project, User
+from .models import ApiKey, Membership, Memory, OutboxEvent, Project, User
 
 
 class ApiKeyRepository:
@@ -114,5 +114,23 @@ class MemoryRepository:
             .order_by(Memory.created_at.desc())
             .limit(limit)
             .offset(offset)
+        )
+        return list(result.scalars().all())
+
+
+class OutboxRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def claim_pending(self, limit: int) -> list[OutboxEvent]:
+        result = await self.session.execute(
+            select(OutboxEvent)
+            .where(
+                OutboxEvent.status == "pending",
+                OutboxEvent.available_at <= func.now(),
+            )
+            .order_by(OutboxEvent.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
         )
         return list(result.scalars().all())
