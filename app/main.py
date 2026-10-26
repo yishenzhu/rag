@@ -5,8 +5,9 @@ The legacy routers stay available under /legacy until they are migrated to /v1.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from redis.asyncio import Redis
@@ -14,6 +15,7 @@ from redis.asyncio import Redis
 from ..conf import get_settings
 from ..core import Config, setup_logger
 from ..engine import RAGPipeline
+from ..infrastructure.cache.last_used import flush_forever
 from ..infrastructure.vector.memory_index import MemoryIndex
 from ..routes import router as legacy_router
 from .api_key_routes import router as api_key_router
@@ -50,9 +52,13 @@ def create_app() -> FastAPI:
             app.state.memory_index = None
             logger.exception("RAG pipeline initialization failed")
 
+        flush_task = asyncio.create_task(flush_forever(redis))
         try:
             yield
         finally:
+            flush_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await flush_task
             if pipeline is not None:
                 await pipeline.close()
                 logger.info("RAG pipeline closed")

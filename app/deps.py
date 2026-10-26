@@ -7,10 +7,12 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..conf import get_settings
 from ..infrastructure.cache.api_keys import ApiKeyCache
+from ..infrastructure.cache.last_used import HASH_KEY
 from ..infrastructure.cache.quota import QuotaLimiter
 from ..infrastructure.cache.rate_limit import RateLimiter
 from ..infrastructure.db.engine import get_session
@@ -110,6 +112,12 @@ async def require_api_key(
                 "monthly quota exceeded",
                 headers={**AUTH_HEADERS, "Retry-After": "3600"},
             )
+        try:
+            await redis.hset(
+                HASH_KEY, str(record.id), str(int(now.timestamp()))
+            )
+        except RedisError:
+            pass
 
     scopes = tuple(record.scopes or ())
     ctx = get_context()
