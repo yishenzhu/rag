@@ -87,6 +87,17 @@ class FakeIndex:
         return self.hits
 
 
+class FakeRedis:
+    def __init__(self): self.data = {}
+    async def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.data:
+            return None
+        self.data[key] = value
+        return True
+    async def get(self, key): return self.data.get(key)
+    async def delete(self, key): self.data.pop(key, None)
+
+
 @pytest.mark.asyncio
 async def test_create_and_dedupe_memory():
     principal = make_principal()
@@ -210,3 +221,20 @@ async def test_search_memories():
     assert (results[0].id, results[0].content, results[0].score) == (
         hit.memory_id, hit.content, hit.score
     )
+
+
+@pytest.mark.asyncio
+async def test_create_memory_idempotency():
+    principal = make_principal()
+    redis = FakeRedis()
+    request = CreateMemoryRequest(content="hello", metadata={"topic": "x"})
+
+    first = await create_memory(
+        request, principal, FakeSession(), redis=redis, idempotency_key="k1"
+    )
+    assert first.id
+    with pytest.raises(HTTPException) as exc:
+        await create_memory(
+            request, principal, FakeSession(), redis=redis, idempotency_key="k1"
+        )
+    assert exc.value.status_code == 409

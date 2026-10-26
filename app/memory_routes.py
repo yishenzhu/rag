@@ -5,11 +5,13 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
+from redis.asyncio import Redis
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..infrastructure.cache.idempotency import IdempotencyStore
 from ..infrastructure.db.engine import get_session
 from ..infrastructure.db.models import Memory
 from ..infrastructure.db.outbox import (
@@ -18,7 +20,7 @@ from ..infrastructure.db.outbox import (
 )
 from ..infrastructure.db.repositories import MemoryRepository
 from ..infrastructure.vector.memory_index import MemoryIndex
-from .deps import AuthPrincipal, get_memory_index, require_scope
+from .deps import AuthPrincipal, get_memory_index, get_redis, require_scope
 
 router = APIRouter(prefix="/memories", tags=["memories"])
 
@@ -76,11 +78,25 @@ async def create_memory(
     req: CreateMemoryRequest,
     principal: Annotated[AuthPrincipal, Depends(require_scope("memories:write"))],
     session: Annotated[AsyncSession, Depends(get_session)],
+    redis: Annotated[Redis | None, Depends(get_redis)] = None,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> MemoryResponse:
     repo = MemoryRepository(session)
     digest = content_hash(req.content)
+    key = idempotency_key.strip() if idempotency_key else ""
+    store = IdempotencyStore(redis) if redis is not None and key else None
+    scope = f"memory.create:{principal.tenant_id}"
+    request_hash = hashlib.sha256(req.model_dump_json().encode()).hexdigest()
+    if store is not None:
+        status = await store.claim(scope, key, request_hash)
+        if status != "claimed":
+            detail = {"in_progress": "request in progress", "duplicate": "duplicate request", "reused": "idempotency key reused"}.get(status, "idempotency conflict")
+            raise HTTPException(409, detail)
+
     existing = await repo.get_by_content_hash(principal.project_id, digest)
     if existing is not None:
+        if store is not None:
+            await store.complete(scope, key, request_hash)
         return MemoryResponse.model_validate(existing)
 
     now = datetime.now(UTC)
@@ -105,10 +121,18 @@ async def create_memory(
         await session.commit()
     except IntegrityError:
         await session.rollback()
-        existing = await repo.get_by_content_hash(principal.project_id, digest)
+        existing = await repo.get_by_content_hash(
+            principal.project_id, digest
+        )
         if existing is not None:
+            if store is not None:
+                await store.complete(scope, key, request_hash)
             return MemoryResponse.model_validate(existing)
+        if store is not None:
+            await store.release(scope, key)
         raise HTTPException(409, "memory conflict") from None
+    if store is not None:
+        await store.complete(scope, key, request_hash)
     return MemoryResponse.model_validate(memory)
 
 
