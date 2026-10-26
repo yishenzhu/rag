@@ -22,6 +22,7 @@ from ..infrastructure.observability.metrics import (
     AUTH_FAILURES,
     QUOTA_EXCEEDED,
     RATE_LIMIT_REJECTED,
+    tenant_label,
 )
 from ..infrastructure.vector.memory_index import MemoryIndex
 from ..security.api_keys import ApiKeyError, has_scope, parse_api_key, verify_api_key
@@ -109,7 +110,7 @@ async def require_api_key(
         )
         allowed, _ = await limiter.allow(f"key:{record.id}")
         if not allowed:
-            RATE_LIMIT_REJECTED.inc()
+            RATE_LIMIT_REJECTED.labels(tenant_label(record.tenant_id)).inc()
             raise HTTPException(
                 429,
                 "rate limit exceeded",
@@ -118,7 +119,7 @@ async def require_api_key(
         quota = QuotaLimiter(redis, settings.monthly_request_quota)
         allowed, _ = await quota.consume(record.tenant_id)
         if not allowed:
-            QUOTA_EXCEEDED.inc()
+            QUOTA_EXCEEDED.labels(tenant_label(record.tenant_id)).inc()
             raise HTTPException(
                 429,
                 "monthly quota exceeded",
@@ -139,6 +140,7 @@ async def require_api_key(
     ctx.actor_type = "api_key"
     ctx.actor_id = str(record.id)
     ctx.scopes = scopes
+    request.state.tenant_id = str(record.tenant_id)
     return AuthPrincipal(record.id, record.tenant_id, record.project_id, scopes)
 
 
@@ -164,6 +166,7 @@ async def require_user(
     ctx.tenant_id = str(payload.tenant_id)
     ctx.actor_type = "user"
     ctx.actor_id = str(user.id)
+    request.state.tenant_id = str(payload.tenant_id)
     return UserPrincipal(user.id, user.email, payload.tenant_id, payload.role)
 
 

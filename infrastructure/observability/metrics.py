@@ -1,5 +1,6 @@
 """Prometheus metrics and ASGI instrumentation."""
 
+import os
 import time
 
 from fastapi import Response
@@ -12,15 +13,27 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .tracing import current_trace_id
 
+# 只给白名单内的租户打标签，其余归入 other，避免标签基数失控。
+MONITORED_TENANTS = frozenset(
+    filter(None, os.getenv("METRICS_TENANT_ALLOWLIST", "").split(","))
+)
+
+
+def tenant_label(tenant_id: str | None) -> str:
+    if tenant_id and str(tenant_id) in MONITORED_TENANTS:
+        return str(tenant_id)
+    return "other"
+
+
 HTTP_REQUESTS = Counter(
     "http_requests_total",
     "HTTP requests",
-    ["method", "route", "status"],
+    ["method", "route", "status", "tenant"],
 )
 HTTP_DURATION = Histogram(
     "http_request_duration_seconds",
     "HTTP request duration",
-    ["method", "route"],
+    ["method", "route", "tenant"],
 )
 AUTH_FAILURES = Counter(
     "auth_failures_total",
@@ -30,10 +43,12 @@ AUTH_FAILURES = Counter(
 RATE_LIMIT_REJECTED = Counter(
     "rate_limit_rejected_total",
     "Rate limited requests",
+    ["tenant"],
 )
 QUOTA_EXCEEDED = Counter(
     "quota_exceeded_total",
     "Quota exceeded requests",
+    ["tenant"],
 )
 USAGE_FLUSH_FAILURES = Counter(
     "usage_flush_failures_total",
@@ -90,10 +105,11 @@ class MetricsMiddleware:
             route = scope.get("route")
             path = getattr(route, "path", None) or scope.get("path", "unknown")
             method = scope.get("method", "UNKNOWN")
+            tenant = tenant_label(scope.get("state", {}).get("tenant_id"))
             exemplar = {"trace_id": trace_id} if trace_id else None
-            HTTP_REQUESTS.labels(method, path, str(status_code)).inc(
+            HTTP_REQUESTS.labels(method, path, str(status_code), tenant).inc(
                 exemplar=exemplar
             )
-            HTTP_DURATION.labels(method, path).observe(
+            HTTP_DURATION.labels(method, path, tenant).observe(
                 time.perf_counter() - start, exemplar=exemplar
             )
