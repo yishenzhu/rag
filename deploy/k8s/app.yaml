@@ -110,7 +110,7 @@ metadata:
   name: rag-worker
   namespace: rag
 spec:
-  # usage flush 的 lrange + ltrim 不是原子操作，保持单副本。
+  # usage flush 已原子取批，可水平扩展；多副本时指标需按 Pod 抓取。
   replicas: 1
   selector:
     matchLabels: {app: rag-worker}

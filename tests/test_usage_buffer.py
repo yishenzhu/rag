@@ -20,15 +20,17 @@ class FakeRedis:
             raise RedisError("down")
         self.items.append(value)
 
-    async def lrange(self, key, start, end):
+    async def lpop(self, key, count=None):
         if self.fail:
             raise RedisError("down")
-        return self.items[start : end + 1]
+        if not self.items:
+            return None
+        batch, self.items = self.items[:count], self.items[count:]
+        return batch
 
-    async def ltrim(self, key, start, end):
-        if self.fail:
-            raise RedisError("down")
-        self.items = self.items[start:]
+    async def lpush(self, key, *values):
+        for value in values:
+            self.items.insert(0, value)
 
 
 class FakeSession:

@@ -11,6 +11,7 @@ from ..conf import get_settings
 from ..core import Config, setup_logger
 from ..embedding import EmbeddingClient
 from ..infrastructure.db.engine import dispose_engine, get_engine, get_session_factory
+from ..infrastructure.db.expiry import expire_forever
 from ..infrastructure.db.outbox import TOPIC_MEMORY_DELETE, TOPIC_MEMORY_INGEST
 from ..infrastructure.observability.backlog import refresh_backlog_forever
 from ..infrastructure.observability.tracing import instrument_engine, setup_tracing
@@ -73,6 +74,7 @@ async def main() -> None:
                 OutboxRelay(relay_session, producer).run_forever(),
                 consume(consumer, consumer_session, index, producer),
                 refresh_backlog_forever(),
+                expire_forever(),
             )
     finally:
         await consumer.stop()
