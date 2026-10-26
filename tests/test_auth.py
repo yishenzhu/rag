@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from rag.app.deps import AuthPrincipal, require_api_key, require_scope
 from rag.app.middleware import RequestContext, context, get_context
 from rag.conf import get_settings
+from rag.infrastructure.cache.api_keys import ApiKeyCache
 from rag.security.api_keys import generate_api_key
 
 PEPPER = get_settings().api_key_pepper
@@ -42,8 +43,28 @@ class FakeApiKeyRepository:
 
 async def authenticate(token, record):
     return await require_api_key(
-        make_request(token), FakeApiKeyRepository(record)
+        make_request(token), FakeApiKeyRepository(record), None
     )
+
+
+class CacheRedis:
+    def __init__(self): self.data = {}
+    async def get(self, key): return self.data.get(key)
+    async def set(self, key, value, ex=None): self.data[key] = value
+
+
+class NoDatabase:
+    async def get_by_prefix(self, key_prefix): raise AssertionError("db lookup should be skipped")
+
+
+@pytest.mark.asyncio
+async def test_require_api_key_uses_cache():
+    material = generate_api_key(PEPPER)
+    record = make_record(material)
+    redis = CacheRedis()
+    await ApiKeyCache(redis).set(record)
+    principal = await require_api_key(make_request(material.plaintext), NoDatabase(), redis)
+    assert principal.api_key_id == record.id
 
 
 @pytest.mark.asyncio

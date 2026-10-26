@@ -9,7 +9,9 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from redis.asyncio import Redis
 
+from ..conf import get_settings
 from ..core import Config, setup_logger
 from ..engine import RAGPipeline
 from ..infrastructure.vector.memory_index import MemoryIndex
@@ -27,7 +29,9 @@ logger = logging.getLogger(__name__)
 
 def create_app() -> FastAPI:
     conf = Config.load()
+    settings = get_settings()
     setup_logger(conf.log)
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -52,8 +56,10 @@ def create_app() -> FastAPI:
             if pipeline is not None:
                 await pipeline.close()
                 logger.info("RAG pipeline closed")
+            await redis.aclose()
 
     app = FastAPI(title="RAG Service", version="2.0.0", lifespan=lifespan)
+    app.state.redis = redis
     app.add_middleware(RequestContextMiddleware)
     app.include_router(health_router)
     app.include_router(health_router, prefix="/v1")

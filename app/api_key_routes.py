@@ -6,15 +6,17 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
+from redis.asyncio import Redis
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..conf import get_settings
+from ..infrastructure.cache.api_keys import ApiKeyCache
 from ..infrastructure.db.engine import get_session
 from ..infrastructure.db.models import ApiKey, Project
 from ..infrastructure.db.repositories import ApiKeyRepository
 from ..security.api_keys import ApiKeyError, generate_api_key, normalize_scopes
-from .deps import UserPrincipal, require_role
+from .deps import UserPrincipal, get_redis, require_role
 
 router = APIRouter(prefix="/api-keys", tags=["api-keys"])
 
@@ -48,6 +50,7 @@ async def create_api_key(
     req: CreateApiKeyRequest,
     principal: Annotated[UserPrincipal, Depends(require_role("owner", "admin"))],
     session: Annotated[AsyncSession, Depends(get_session)],
+    redis: Annotated[Redis | None, Depends(get_redis)],
 ) -> CreatedApiKeyResponse:
     project = await session.get(Project, req.project_id)
     if project is None or project.tenant_id != principal.tenant_id:
@@ -78,6 +81,8 @@ async def create_api_key(
         except IntegrityError:
             await session.rollback()
             continue
+        if redis is not None:
+            await ApiKeyCache(redis).set(record)
         data = ApiKeyResponse.model_validate(record).model_dump()
         return CreatedApiKeyResponse(**data, key=material.plaintext)
 
@@ -101,6 +106,7 @@ async def revoke_api_key(
     key_id: UUID,
     principal: Annotated[UserPrincipal, Depends(require_role("owner", "admin"))],
     session: Annotated[AsyncSession, Depends(get_session)],
+    redis: Annotated[Redis | None, Depends(get_redis)],
 ) -> None:
     record = await ApiKeyRepository(session).get_for_tenant(
         key_id, principal.tenant_id
@@ -111,3 +117,5 @@ async def revoke_api_key(
     record.status = "revoked"
     record.revoked_at = datetime.now(UTC)
     await session.commit()
+    if redis is not None:
+        await ApiKeyCache(redis).delete(record.key_prefix)

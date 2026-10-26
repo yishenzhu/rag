@@ -68,6 +68,7 @@ async def test_create_and_list_api_key():
         ),
         principal,
         session,
+        None,
     )
     record = session.added[0]
     assert isinstance(record, ApiKey)
@@ -85,13 +86,13 @@ async def test_revoke_api_key():
     principal = make_principal()
     record = SimpleNamespace(id=uuid4(), status="active", revoked_at=None)
     session = FakeSession(one=record)
-    await revoke_api_key(record.id, principal, session)
+    await revoke_api_key(record.id, principal, session, None)
 
     assert record.status == "revoked" and record.revoked_at is not None
     assert session.committed
 
     with pytest.raises(HTTPException) as exc:
-        await revoke_api_key(uuid4(), principal, FakeSession(one=None))
+        await revoke_api_key(uuid4(), principal, FakeSession(one=None), None)
     assert exc.value.status_code == 404
 
 

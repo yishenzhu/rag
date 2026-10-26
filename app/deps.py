@@ -6,9 +6,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..conf import get_settings
+from ..infrastructure.cache.api_keys import ApiKeyCache
 from ..infrastructure.db.engine import get_session
 from ..infrastructure.db.repositories import ApiKeyRepository, UserRepository
 from ..infrastructure.vector.memory_index import MemoryIndex
@@ -41,6 +43,10 @@ async def get_api_key_repository(
     return ApiKeyRepository(session)
 
 
+def get_redis(request: Request) -> Redis | None:
+    return getattr(request.app.state, "redis", None)
+
+
 def get_memory_index(request: Request) -> MemoryIndex:
     index = getattr(request.app.state, "memory_index", None)
     if index is None:
@@ -51,6 +57,7 @@ def get_memory_index(request: Request) -> MemoryIndex:
 async def require_api_key(
     request: Request,
     repo: Annotated[ApiKeyRepository, Depends(get_api_key_repository)],
+    redis: Annotated[Redis | None, Depends(get_redis)],
 ) -> AuthPrincipal:
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
     token = token.strip()
@@ -62,7 +69,12 @@ async def require_api_key(
     except ApiKeyError:
         raise HTTPException(401, "malformed api key", headers=AUTH_HEADERS) from None
 
-    record = await repo.get_by_prefix(parsed.key_prefix)
+    cache = ApiKeyCache(redis) if redis is not None else None
+    record = await cache.get(parsed.key_prefix) if cache is not None else None
+    if record is None:
+        record = await repo.get_by_prefix(parsed.key_prefix)
+        if record is not None and cache is not None:
+            await cache.set(record)
     if record is None or not verify_api_key(
         token, record.key_hash, get_settings().api_key_pepper
     ):
