@@ -1,0 +1,74 @@
+{
+  "uid": "rag-pipeline",
+  "title": "RAG Pipeline",
+  "tags": ["rag", "worker"],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": {"from": "now-1h", "to": "now"},
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Outbox pending",
+      "gridPos": {"x": 0, "y": 0, "w": 8, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "rag"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outbox_pending{job=\"rag-worker\"})",
+          "legendFormat": "pending"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Oldest pending age",
+      "gridPos": {"x": 8, "y": 0, "w": 8, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "rag"},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outbox_oldest_pending_seconds{job=\"rag-worker\"})",
+          "legendFormat": "seconds"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Background failures",
+      "gridPos": {"x": 16, "y": 0, "w": 8, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "rag"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(outbox_publish_failures_total[5m]))",
+          "legendFormat": "outbox_publish"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(usage_flush_failures_total[5m]))",
+          "legendFormat": "usage_flush"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Memories by status",
+      "gridPos": {"x": 0, "y": 6, "w": 24, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "rag"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (memories_by_status{job=\"rag-worker\"})",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    }
+  ]
+}

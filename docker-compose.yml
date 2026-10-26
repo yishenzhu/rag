@@ -187,7 +187,8 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_ANALYTICS_REPORTING_ENABLED: "false"
     volumes:
-      - ./observability/grafana:/etc/grafana/provisioning/datasources:ro
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana:/var/lib/grafana
     ports:
       - "3000:3000"

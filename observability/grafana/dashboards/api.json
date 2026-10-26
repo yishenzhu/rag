@@ -1,0 +1,89 @@
+{
+  "uid": "rag-api",
+  "title": "RAG API",
+  "tags": ["rag", "api"],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": {"from": "now-1h", "to": "now"},
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "QPS by route",
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "rag"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (route) (rate(http_requests_total{route!=\"/metrics\"}[1m]))",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Latency P95 by route",
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "rag"},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket{route!=\"/metrics\"}[5m])))",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "5xx ratio",
+      "gridPos": {"x": 0, "y": 8, "w": 8, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "rag"},
+      "fieldConfig": {"defaults": {"unit": "percentunit"}},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 0.000001)",
+          "legendFormat": "5xx"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Rejections",
+      "gridPos": {"x": 8, "y": 8, "w": 8, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "rag"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(rate_limit_rejected_total[5m]))",
+          "legendFormat": "rate_limited"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(quota_exceeded_total[5m]))",
+          "legendFormat": "quota_exceeded"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Auth failures by reason",
+      "gridPos": {"x": 16, "y": 8, "w": 8, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "rag"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (rate(auth_failures_total[5m]))",
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    }
+  ]
+}
