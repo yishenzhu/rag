@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 import yaml
@@ -96,6 +97,7 @@ class Config(BaseModel):
 
     @classmethod
     def load(cls, path: str = "conf/conf.yaml"):
+        path = os.getenv("RAG_CONF", path)
         with open(auto_path(path), encoding="utf-8") as f:
             data = yaml.safe_load(f)
         return cls.model_validate(data)

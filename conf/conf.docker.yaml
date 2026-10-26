@@ -1,0 +1,40 @@
+app:
+  host: "0.0.0.0"
+  port: 8001
+
+rag:
+  qdrant:
+    host: "qdrant"
+    port: 6333
+
+  embedding:
+    host: "host.docker.internal"
+    port: 8002
+
+  rerank:
+    host: "host.docker.internal"
+    port: 8003
+
+embedding:
+  host: "0.0.0.0"
+  port: 8002
+  id: "qwen3vl-2b-int8-v1"
+  model: "models/Qwen3-VL-Embedding-2B"
+  batch_size: 32
+  multimodal: true
+
+rerank:
+  host: "0.0.0.0"
+  port: 8003
+  model: "models/Qwen3-VL-Reranker-2B"
+  batch_size: 64
+  multimodal: true
+
+log:
+  level: "INFO"
+  path: "logs/rag.log"
+  backup_count: 30
+
+mcp:
+  host: "127.0.0.1"
+  port: 9000
