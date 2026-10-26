@@ -72,6 +72,9 @@ class MemoryRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def get_by_id(self, memory_id: UUID) -> Memory | None:
+        return await self.session.get(Memory, memory_id)
+
     async def get_by_content_hash(
         self,
         project_id: UUID,
