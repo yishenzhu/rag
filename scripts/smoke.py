@@ -1,93 +1,99 @@
-"""End-to-end smoke test against a running API."""
+"""End-to-end smoke test against a running API, using the SDK."""
 
+import asyncio
 import os
 import sys
-import time
 from uuid import uuid4
 
 import httpx
+from rag.sdk import ApiError, RagClient
 
 BASE = os.getenv("API_URL", "http://localhost:8001")
 PASSWORD = "secret123"
 
 
-def call(client, method, path, token=None, **kwargs):
-    headers = kwargs.pop("headers", {})
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    response = client.request(method, f"{BASE}{path}", headers=headers, **kwargs)
-    if response.status_code >= 400:
-        print(f"FAIL {method} {path}: {response.status_code} {response.text}")
-        sys.exit(1)
-    return response
+async def wait_active(client: RagClient, memory_id: str, timeout: int = 30) -> None:
+    for _ in range(timeout):
+        memory = await client.get_memory(memory_id)
+        if memory["status"] == "active":
+            return
+        await asyncio.sleep(1)
+    raise RuntimeError("memory not indexed within 30s; is worker running?")
 
 
-def main() -> None:
-    with httpx.Client(timeout=30) as client:
-        email = f"smoke-{uuid4().hex[:8]}@example.com"
-        reg = call(
-            client,
-            "POST",
-            "/v1/auth/register",
-            json={
-                "email": email,
-                "password": PASSWORD,
-                "tenant_name": "Smoke",
-            },
-        ).json()
-        token, project_id = reg["access_token"], reg["project_id"]
+async def main() -> None:
+    email = f"smoke-{uuid4().hex[:8]}@example.com"
+    async with RagClient(BASE) as client:
+        registered = await client.register(email, PASSWORD, "Smoke")
         print("registered", email)
 
-        key = call(
-            client,
-            "POST",
-            "/v1/api-keys",
-            token,
-            json={
-                "name": "smoke",
-                "project_id": project_id,
-                "scopes": ["memories:read", "memories:write"],
-            },
-        ).json()["key"]
-        print("api key created")
+        project = await client.create_project(
+            "smoke-project", slug=f"smoke-{uuid4().hex[:8]}"
+        )
+        created_key = await client.create_api_key(
+            project["id"], "smoke", ["memories:read", "memories:write"]
+        )
+        print("project and api key created")
 
-        memory = call(
-            client,
-            "POST",
-            "/v1/memories",
-            key,
-            json={
-                "content": "smoke memory about dark theme",
-                "metadata": {"source": "smoke"},
-            },
-        ).json()
-        memory_id = memory["id"]
-        print("memory", memory_id, memory["status"])
+        client.api_key = created_key["key"]
+        client.token = None
 
-        for _ in range(30):
-            current = call(
-                client, "GET", f"/v1/memories/{memory_id}", key
-            ).json()
-            if current["status"] == "active":
-                break
-            time.sleep(1)
-        else:
-            print("FAIL memory not indexed within 30s; is worker running?")
-            sys.exit(1)
+        payload = {"metadata": {"source": "smoke"}}
+        memory = await client.create_memory(
+            "smoke memory about dark theme", idempotency_key="smoke-1", **payload
+        )
+        replay = await client.create_memory(
+            "smoke memory about dark theme", idempotency_key="smoke-1", **payload
+        )
+        if replay["id"] != memory["id"]:
+            raise RuntimeError("idempotent replay returned a different memory")
+        print("memory", memory["id"], "idempotent replay ok")
+
+        await wait_active(client, memory["id"])
         print("memory active")
 
-        results = call(
-            client,
-            "POST",
-            "/v1/memories/search",
-            key,
-            json={"query": "dark theme", "top_k": 5},
-        ).json()
-        if not any(item["id"] == memory_id for item in results):
-            print("FAIL memory not found in search")
-            sys.exit(1)
+        results = await client.search_memories("dark theme", top_k=5)
+        if not any(item["id"] == memory["id"] for item in results):
+            raise RuntimeError("memory not found in search")
         print("search ok:", len(results), "results")
+
+        listed = await client.list_memories(limit=10)
+        if not any(item["id"] == memory["id"] for item in listed):
+            raise RuntimeError("memory not found in list")
+        print("list ok")
+
+        updated = await client.update_memory(
+            memory["id"], metadata={"source": "smoke", "tag": "v2"}
+        )
+        if updated["metadata"].get("tag") != "v2":
+            raise RuntimeError("update did not apply")
+        print("update ok")
+
+        await client.delete_memory(memory["id"])
+        try:
+            await client.get_memory(memory["id"])
+        except ApiError as exc:
+            if exc.status_code != 404:
+                raise
+            print("delete ok, 404 after delete")
+        else:
+            raise RuntimeError("deleted memory is still readable")
+
+        client.api_key = None
+        client.token = registered["access_token"]
+        usage = await client.usage()
+        print("usage ok:", usage["totals"])
+
+    with httpx.Client(timeout=10) as raw:
+        response = raw.get(f"{BASE}/metrics", headers={"Accept": "text/plain"})
+        if "http_requests_total" not in response.text:
+            raise RuntimeError("metrics endpoint missing http_requests_total")
+        print("metrics ok")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except Exception as exc:  # noqa: BLE001
+        print("FAIL:", exc)
+        sys.exit(1)
