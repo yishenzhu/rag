@@ -36,6 +36,7 @@ Redis（Key 缓存、限流、配额、幂等、last_used、用量缓冲）
 - `sdk/` - 异步 Python 客户端
 - `observability/` - Prometheus 抓取/告警规则、Alertmanager、Grafana 数据源与看板
 - `deploy/k8s/` - Kubernetes 部署清单
+- `docs/` - 设计文档：[多租户体系设计](docs/tenant-design.md)
 - `scripts/` - `smoke.py` 端到端自检、`loadtest.py` 压测
 - `engine/`、`embedding/`、`rerank/`、`eval/`、`vector_store/`、`routes/`、`main.py`、`mcp_server.py` - 旧版 RAG 能力（仍可用，见文末）
 
