@@ -1,0 +1,29 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default
+  group_by: ["alertname", "severity", "job"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ['severity="critical"']
+      receiver: critical
+      repeat_interval: 1h
+
+receivers:
+  - name: default
+  - name: critical
+    # 真实环境换成 webhook / 邮件 / 飞书机器人即可收到通知，例如：
+    # webhook_configs:
+    #   - url: http://host.docker.internal:5001/alerts
+    #     send_resolved: true
+
+inhibit_rules:
+  - source_matchers: ['alertname="RagApiDown"']
+    target_matchers: ['severity=~"warning|critical"']
+    equal: ["job"]
+  - source_matchers: ['alertname="RagWorkerDown"']
+    target_matchers: ['severity=~"warning|critical"']
+    equal: ["job"]

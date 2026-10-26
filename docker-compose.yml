@@ -179,6 +179,22 @@ services:
     depends_on:
       api:
         condition: service_started
+      alertmanager:
+        condition: service_started
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager:/alertmanager
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "9093:9093"
     restart: unless-stopped
 
   grafana:
@@ -202,4 +218,5 @@ volumes:
   pgdata:
   qdrant:
   prometheus:
+  alertmanager:
   grafana:

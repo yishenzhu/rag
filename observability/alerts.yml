@@ -12,8 +12,8 @@ groups:
 
       - alert: RagApiHighErrorRate
         expr: |
-          sum(rate(http_requests_total{status=~"5..",route!="/metrics"}[5m]))
-            / clamp_min(sum(rate(http_requests_total{route!="/metrics"}[5m])), 0.000001) > 0.05
+          sum by (job) (rate(http_requests_total{status=~"5..",route!="/metrics"}[5m]))
+            / clamp_min(sum by (job) (rate(http_requests_total{route!="/metrics"}[5m])), 0.000001) > 0.05
         for: 10m
         labels:
           severity: critical
@@ -24,7 +24,7 @@ groups:
       - alert: RagApiHighLatencyP95
         expr: |
           histogram_quantile(0.95,
-            sum by (le) (rate(http_request_duration_seconds_bucket{route!="/metrics"}[5m]))) > 2
+            sum by (job, le) (rate(http_request_duration_seconds_bucket{route!="/metrics"}[5m]))) > 2
         for: 10m
         labels:
           severity: warning
@@ -33,7 +33,7 @@ groups:
           description: "当前 P95 为 {{ $value | humanizeDuration }}。"
 
       - alert: RagAuthFailureSpike
-        expr: sum(rate(auth_failures_total[5m])) > 5
+        expr: sum by (job) (rate(auth_failures_total[5m])) > 5
         for: 10m
         labels:
           severity: warning
@@ -53,7 +53,7 @@ groups:
           description: "{{ $labels.instance }} 已连续 2 分钟无法抓取。"
 
       - alert: RagOutboxBacklog
-        expr: max(outbox_pending{job="rag-worker"}) > 1000
+        expr: max by (job) (outbox_pending{job="rag-worker"}) > 1000
         for: 10m
         labels:
           severity: warning
@@ -62,7 +62,7 @@ groups:
           description: "当前 {{ $value }} 条待投递。"
 
       - alert: RagOutboxStale
-        expr: max(outbox_oldest_pending_seconds{job="rag-worker"}) > 300
+        expr: max by (job) (outbox_oldest_pending_seconds{job="rag-worker"}) > 300
         for: 5m
         labels:
           severity: critical
@@ -71,7 +71,7 @@ groups:
           description: "当前已等待 {{ $value | humanizeDuration }}。"
 
       - alert: RagOutboxPublishFailures
-        expr: sum(rate(outbox_publish_failures_total[5m])) > 0
+        expr: sum by (job) (rate(outbox_publish_failures_total[5m])) > 0
         for: 10m
         labels:
           severity: warning
@@ -80,7 +80,7 @@ groups:
           description: "当前 {{ $value | humanize }} 次/秒。"
 
       - alert: RagUsageFlushFailures
-        expr: sum(rate(usage_flush_failures_total[5m])) > 0
+        expr: sum by (job) (rate(usage_flush_failures_total[5m])) > 0
         for: 10m
         labels:
           severity: warning
@@ -89,7 +89,7 @@ groups:
           description: "当前 {{ $value | humanize }} 次/秒。"
 
       - alert: RagMemoryPendingBacklog
-        expr: sum(memories_by_status{status="pending",job="rag-worker"}) > 5000
+        expr: sum by (job) (memories_by_status{status="pending",job="rag-worker"}) > 5000
         for: 15m
         labels:
           severity: warning
