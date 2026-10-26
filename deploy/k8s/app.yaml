@@ -1,0 +1,160 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rag
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-config
+  namespace: rag
+data:
+  DATABASE_URL: postgresql+asyncpg://rag:rag@postgres.example.internal:5432/rag
+  REDIS_URL: redis://redis.example.internal:6379/0
+  KAFKA_BOOTSTRAP_SERVERS: kafka.example.internal:9092
+  RAG_CONF: /srv/rag/conf/conf.docker.yaml
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rag-secrets
+  namespace: rag
+type: Opaque
+stringData:
+  API_KEY_PEPPER: change-me
+  JWT_SECRET: change-me-0123456789abcdef0123456789abcdef
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rag-migrate
+  namespace: rag
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: rag-api:latest
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef: {name: rag-config}
+            - secretRef: {name: rag-secrets}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-api
+  namespace: rag
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: rag-api}
+  template:
+    metadata:
+      labels: {app: rag-api}
+    spec:
+      containers:
+        - name: api
+          image: rag-api:latest
+          ports:
+            - {containerPort: 8001, name: http}
+          envFrom:
+            - configMapRef: {name: rag-config}
+            - secretRef: {name: rag-secrets}
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: "1", memory: 512Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-api
+  namespace: rag
+spec:
+  selector: {app: rag-api}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: rag-api
+  namespace: rag
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: rag-api}
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 70}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-worker
+  namespace: rag
+spec:
+  # usage flush 的 lrange + ltrim 不是原子操作，保持单副本。
+  replicas: 1
+  selector:
+    matchLabels: {app: rag-worker}
+  template:
+    metadata:
+      labels: {app: rag-worker}
+    spec:
+      containers:
+        - name: worker
+          image: rag-api:latest
+          command: ["python", "-m", "rag.worker"]
+          ports:
+            - {containerPort: 8004, name: metrics}
+          envFrom:
+            - configMapRef: {name: rag-config}
+            - secretRef: {name: rag-secrets}
+          resources:
+            requests: {cpu: 100m, memory: 192Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-worker
+  namespace: rag
+spec:
+  selector: {app: rag-worker}
+  ports:
+    - {name: metrics, port: 8004, targetPort: metrics}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rag-api
+  namespace: rag
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: rag.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rag-api
+                port: {name: http}
