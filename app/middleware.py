@@ -6,9 +6,10 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from uuid import uuid4
 
-from opentelemetry import trace
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from ..infrastructure.observability.tracing import current_trace_id
 
 MAX_REQUEST_ID_LEN = 128
 
@@ -31,11 +32,6 @@ context: ContextVar[RequestContext | None] = ContextVar(
 def get_context() -> RequestContext:
     """Return the current request context (fallback keeps direct calls safe)."""
     return context.get() or RequestContext(request_id="-")
-
-
-def current_trace_id() -> str | None:
-    span_context = trace.get_current_span().get_span_context()
-    return format(span_context.trace_id, "032x") if span_context.is_valid else None
 
 
 class RequestContextMiddleware:

@@ -25,6 +25,11 @@ def traces_endpoint(raw: str) -> str:
     return endpoint if endpoint.endswith(TRACES_PATH) else endpoint + TRACES_PATH
 
 
+def current_trace_id() -> str | None:
+    span_context = trace.get_current_span().get_span_context()
+    return format(span_context.trace_id, "032x") if span_context.is_valid else None
+
+
 def setup_tracing(service_name: str) -> None:
     global configured
     if configured:

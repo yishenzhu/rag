@@ -3,14 +3,14 @@
 import time
 
 from fastapi import Response
-from prometheus_client import (
+from prometheus_client import REGISTRY, Counter, Gauge, Histogram
+from prometheus_client.openmetrics.exposition import (
     CONTENT_TYPE_LATEST,
-    Counter,
-    Gauge,
-    Histogram,
     generate_latest,
 )
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from .tracing import current_trace_id
 
 HTTP_REQUESTS = Counter(
     "http_requests_total",
@@ -59,7 +59,9 @@ MEMORIES_BY_STATUS = Gauge(
 
 
 def metrics_response() -> Response:
-    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    return Response(
+        generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST
+    )
 
 
 class MetricsMiddleware:
@@ -73,11 +75,13 @@ class MetricsMiddleware:
 
         start = time.perf_counter()
         status_code = 500
+        trace_id = None
 
         async def send_wrapper(message: Message) -> None:
-            nonlocal status_code
+            nonlocal status_code, trace_id
             if message["type"] == "http.response.start":
                 status_code = message["status"]
+                trace_id = current_trace_id()
             await send(message)
 
         try:
@@ -86,7 +90,10 @@ class MetricsMiddleware:
             route = scope.get("route")
             path = getattr(route, "path", None) or scope.get("path", "unknown")
             method = scope.get("method", "UNKNOWN")
-            HTTP_REQUESTS.labels(method, path, str(status_code)).inc()
+            exemplar = {"trace_id": trace_id} if trace_id else None
+            HTTP_REQUESTS.labels(method, path, str(status_code)).inc(
+                exemplar=exemplar
+            )
             HTTP_DURATION.labels(method, path).observe(
-                time.perf_counter() - start
+                time.perf_counter() - start, exemplar=exemplar
             )
