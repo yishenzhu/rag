@@ -6,6 +6,7 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from redis.asyncio import Redis
 from sqlalchemy.exc import IntegrityError
@@ -73,6 +74,10 @@ def content_hash(content: str) -> str:
     return hashlib.sha256(content.encode()).hexdigest()
 
 
+def memory_body(memory: Memory) -> dict:
+    return MemoryResponse.model_validate(memory).model_dump(mode="json")
+
+
 @router.post("", response_model=MemoryResponse, status_code=201)
 async def create_memory(
     req: CreateMemoryRequest,
@@ -80,7 +85,7 @@ async def create_memory(
     session: Annotated[AsyncSession, Depends(get_session)],
     redis: Annotated[Redis | None, Depends(get_redis)] = None,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-) -> MemoryResponse:
+) -> MemoryResponse | JSONResponse:
     repo = MemoryRepository(session)
     digest = content_hash(req.content)
     key = idempotency_key.strip() if idempotency_key else ""
@@ -88,15 +93,22 @@ async def create_memory(
     scope = f"memory.create:{principal.tenant_id}"
     request_hash = hashlib.sha256(req.model_dump_json().encode()).hexdigest()
     if store is not None:
-        status = await store.claim(scope, key, request_hash)
-        if status != "claimed":
-            detail = {"in_progress": "request in progress", "duplicate": "duplicate request", "reused": "idempotency key reused"}.get(status, "idempotency conflict")
+        claim = await store.claim(scope, key, request_hash)
+        if claim == "duplicate":
+            replayed = await store.response(scope, key, request_hash)
+            if replayed is not None:
+                code, body = replayed
+                return JSONResponse(
+                    body, status_code=code, headers={"Idempotent-Replay": "true"}
+                )
+        if claim != "claimed":
+            detail = {"in_progress": "request in progress", "duplicate": "duplicate request", "reused": "idempotency key reused"}.get(claim, "idempotency conflict")
             raise HTTPException(409, detail)
 
     existing = await repo.get_by_content_hash(principal.project_id, digest)
     if existing is not None:
         if store is not None:
-            await store.complete(scope, key, request_hash)
+            await store.complete(scope, key, request_hash, 201, memory_body(existing))
         return MemoryResponse.model_validate(existing)
 
     now = datetime.now(UTC)
@@ -126,13 +138,15 @@ async def create_memory(
         )
         if existing is not None:
             if store is not None:
-                await store.complete(scope, key, request_hash)
+                await store.complete(
+                    scope, key, request_hash, 201, memory_body(existing)
+                )
             return MemoryResponse.model_validate(existing)
         if store is not None:
             await store.release(scope, key)
         raise HTTPException(409, "memory conflict") from None
     if store is not None:
-        await store.complete(scope, key, request_hash)
+        await store.complete(scope, key, request_hash, 201, memory_body(memory))
     return MemoryResponse.model_validate(memory)
 
 

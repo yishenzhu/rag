@@ -39,3 +39,14 @@ async def test_fail_open():
     assert await store.claim("scope", "k", "hash") == "claimed"
     await store.complete("scope", "k", "hash")
     await store.release("scope", "k")
+
+
+@pytest.mark.asyncio
+async def test_response_replay():
+    store = IdempotencyStore(FakeRedis())
+    assert await store.claim("scope", "k", "hash1") == "claimed"
+
+    await store.complete("scope", "k", "hash1", status=201, body={"id": "m1"})
+    assert await store.claim("scope", "k", "hash1") == "duplicate"
+    assert await store.response("scope", "k", "hash1") == (201, {"id": "m1"})
+    assert await store.response("scope", "k", "hash2") is None

@@ -1,11 +1,13 @@
 """Memory route tests (fake session, no database)."""
 
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 from rag.app.deps import AuthPrincipal
 from rag.app.memory_routes import (
     CreateMemoryRequest,
@@ -233,8 +235,11 @@ async def test_create_memory_idempotency():
         request, principal, FakeSession(), redis=redis, idempotency_key="k1"
     )
     assert first.id
-    with pytest.raises(HTTPException) as exc:
-        await create_memory(
-            request, principal, FakeSession(), redis=redis, idempotency_key="k1"
-        )
-    assert exc.value.status_code == 409
+
+    replay = await create_memory(
+        request, principal, FakeSession(), redis=redis, idempotency_key="k1"
+    )
+    assert isinstance(replay, JSONResponse)
+    assert replay.status_code == 201
+    assert replay.headers["Idempotent-Replay"] == "true"
+    assert json.loads(replay.body)["id"] == str(first.id)
