@@ -23,6 +23,7 @@ def test_tables_registered():
         "api_keys",
         "memories",
         "outbox",
+        "usage_ledger",
     }
 
 
