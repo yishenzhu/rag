@@ -5,7 +5,15 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import ApiKey, Membership, Memory, OutboxEvent, Project, User
+from .models import (
+    ApiKey,
+    Membership,
+    Memory,
+    OutboxEvent,
+    Project,
+    UsageLedger,
+    User,
+)
 
 
 class ApiKeyRepository:
@@ -137,3 +145,48 @@ class OutboxRepository:
             .with_for_update(skip_locked=True)
         )
         return list(result.scalars().all())
+
+
+class UsageRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def totals(
+        self, tenant_id: UUID, period: str
+    ) -> dict[str, int]:
+        result = await self.session.execute(
+            select(UsageLedger.metric, func.sum(UsageLedger.quantity))
+            .where(
+                UsageLedger.tenant_id == tenant_id,
+                UsageLedger.period == period,
+            )
+            .group_by(UsageLedger.metric)
+        )
+        return {
+            metric: int(quantity or 0)
+            for metric, quantity in result.all()
+        }
+
+    async def grouped(
+        self, tenant_id: UUID, period: str, group_by: str
+    ):
+        if group_by == "api_key":
+            dimension = UsageLedger.api_key_id
+        elif group_by == "model":
+            dimension = UsageLedger.model
+        else:
+            dimension = func.date(UsageLedger.occurred_at)
+        result = await self.session.execute(
+            select(
+                dimension,
+                UsageLedger.metric,
+                func.sum(UsageLedger.quantity),
+            )
+            .where(
+                UsageLedger.tenant_id == tenant_id,
+                UsageLedger.period == period,
+            )
+            .group_by(dimension, UsageLedger.metric)
+            .order_by(dimension)
+        )
+        return result.all()

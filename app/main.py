@@ -25,6 +25,7 @@ from .health import router as health_router
 from .memory_routes import router as memory_router
 from .middleware import RequestContextMiddleware
 from .project_routes import router as project_router
+from .usage_routes import router as usage_router
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
     app.include_router(api_key_router, prefix="/v1")
     app.include_router(project_router, prefix="/v1")
     app.include_router(memory_router, prefix="/v1")
+    app.include_router(usage_router, prefix="/v1")
     app.include_router(legacy_router, prefix="/legacy")
     return app
 
