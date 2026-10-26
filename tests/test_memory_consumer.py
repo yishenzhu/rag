@@ -18,7 +18,10 @@ class FakeSession:
 class FakeIndex:
     def __init__(self):
         self.indexed, self.deleted = [], []
-    async def index(self, memory): self.indexed.append(memory)
+        self.indexed_status = []
+    async def index(self, memory):
+        self.indexed.append(memory)
+        self.indexed_status.append(memory.status)
     async def delete(self, memory_id): self.deleted.append(memory_id)
 
 
@@ -49,6 +52,7 @@ async def test_ingest_marks_memory_active():
     await MemoryConsumer(session, index).handle(make_event(memory))
 
     assert index.indexed == [memory]
+    assert index.indexed_status == ["active"]
     assert (memory.status, memory.qdrant_point_id) == ("active", memory.id)
     assert memory.updated_at is not None and session.committed
 

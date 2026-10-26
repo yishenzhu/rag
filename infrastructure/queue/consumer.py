@@ -30,10 +30,11 @@ class MemoryConsumer:
             if memory.status == "deleted":
                 await self.index.delete(memory.id)
             else:
-                await self.index.index(memory)
+                # 先把状态改成 active，索引时的 payload 才会带上正确状态。
                 memory.status = "active"
                 memory.qdrant_point_id = memory.id
                 memory.updated_at = datetime.now(UTC)
+                await self.index.index(memory)
         elif event_type == "memory.deleted":
             await self.index.delete(memory.id)
         await self.session.commit()
