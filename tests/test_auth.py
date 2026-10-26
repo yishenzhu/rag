@@ -54,6 +54,7 @@ class CacheRedis:
     async def get(self, key): return self.data.get(key)
     async def set(self, key, value, ex=None): self.data[key] = value
     async def hset(self, key, field, value): self.data[f"{key}:{field}"] = value
+    async def rpush(self, key, value): self.data[f"{key}:{len(self.data)}"] = value
     async def eval(self, script, numkeys, *args): return [1 if self.allowed else 0, 1]
 
 

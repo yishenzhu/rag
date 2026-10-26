@@ -15,6 +15,7 @@ from ..infrastructure.cache.api_keys import ApiKeyCache
 from ..infrastructure.cache.last_used import HASH_KEY
 from ..infrastructure.cache.quota import QuotaLimiter
 from ..infrastructure.cache.rate_limit import RateLimiter
+from ..infrastructure.cache.usage_buffer import UsageBuffer
 from ..infrastructure.db.engine import get_session
 from ..infrastructure.db.repositories import ApiKeyRepository, UserRepository
 from ..infrastructure.vector.memory_index import MemoryIndex
@@ -118,6 +119,7 @@ async def require_api_key(
             )
         except RedisError:
             pass
+        await UsageBuffer(redis).add(record.tenant_id, record.project_id, record.id, "request", 1, now)
 
     scopes = tuple(record.scopes or ())
     ctx = get_context()

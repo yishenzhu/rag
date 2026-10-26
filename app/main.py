@@ -16,6 +16,7 @@ from ..conf import get_settings
 from ..core import Config, setup_logger
 from ..engine import RAGPipeline
 from ..infrastructure.cache.last_used import flush_forever
+from ..infrastructure.cache.usage_flush import flush_forever as usage_flush_forever
 from ..infrastructure.vector.memory_index import MemoryIndex
 from ..routes import router as legacy_router
 from .api_key_routes import router as api_key_router
@@ -54,12 +55,14 @@ def create_app() -> FastAPI:
             logger.exception("RAG pipeline initialization failed")
 
         flush_task = asyncio.create_task(flush_forever(redis))
+        usage_task = asyncio.create_task(usage_flush_forever(redis))
         try:
             yield
         finally:
-            flush_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await flush_task
+            for task in (flush_task, usage_task):
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
             if pipeline is not None:
                 await pipeline.close()
                 logger.info("RAG pipeline closed")
