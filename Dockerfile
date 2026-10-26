@@ -11,8 +11,8 @@ RUN apt-get update \
 
 RUN pip install --no-cache-dir \
     fastapi "uvicorn[standard]" pydantic pydantic-settings pyyaml \
-    qdrant-client httpx markitdown numpy sqlalchemy asyncpg alembic \
-    pyjwt argon2-cffi aiokafka
+    qdrant-client httpx markitdown numpy "sqlalchemy[asyncio]" asyncpg alembic \
+    pyjwt argon2-cffi aiokafka redis prometheus-client
 
 COPY . /srv/rag
 RUN mkdir -p /srv/rag/logs \

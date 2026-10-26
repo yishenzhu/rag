@@ -4,6 +4,7 @@ import asyncio
 import json
 
 from aiokafka import AIOKafkaConsumer
+from prometheus_client import start_http_server
 from qdrant_client import AsyncQdrantClient
 
 from ..conf import get_settings
@@ -11,10 +12,13 @@ from ..core import Config
 from ..embedding import EmbeddingClient
 from ..infrastructure.db.engine import dispose_engine, get_session_factory
 from ..infrastructure.db.outbox import TOPIC_MEMORY_DELETE, TOPIC_MEMORY_INGEST
+from ..infrastructure.observability.backlog import refresh_backlog_forever
 from ..infrastructure.queue.consumer import MemoryConsumer
 from ..infrastructure.queue.kafka import KafkaProducer
 from ..infrastructure.queue.relay import OutboxRelay
 from ..infrastructure.vector.memory_index import MemoryIndex
+
+METRICS_PORT = 8004
 
 
 async def consume(consumer, session, index, producer) -> None:
@@ -57,12 +61,14 @@ async def main() -> None:
 
     await producer.start()
     await consumer.start()
+    start_http_server(METRICS_PORT)
     factory = get_session_factory()
     try:
         async with factory() as relay_session, factory() as consumer_session:
             await asyncio.gather(
                 OutboxRelay(relay_session, producer).run_forever(),
                 consume(consumer, consumer_session, index, producer),
+                refresh_backlog_forever(),
             )
     finally:
         await consumer.stop()

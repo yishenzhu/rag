@@ -6,6 +6,7 @@ from fastapi import Response
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     Counter,
+    Gauge,
     Histogram,
     generate_latest,
 )
@@ -41,6 +42,19 @@ USAGE_FLUSH_FAILURES = Counter(
 OUTBOX_PUBLISH_FAILURES = Counter(
     "outbox_publish_failures_total",
     "Outbox publish failures",
+)
+OUTBOX_PENDING = Gauge(
+    "outbox_pending",
+    "Outbox rows waiting to be published",
+)
+OUTBOX_OLDEST_PENDING_SECONDS = Gauge(
+    "outbox_oldest_pending_seconds",
+    "Age of the oldest pending outbox row",
+)
+MEMORIES_BY_STATUS = Gauge(
+    "memories_by_status",
+    "Memory rows grouped by status",
+    ["status"],
 )
 
 
