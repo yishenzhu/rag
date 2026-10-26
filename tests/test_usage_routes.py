@@ -1,11 +1,12 @@
 """Usage route tests."""
 
-from datetime import date
+from datetime import UTC, date, datetime
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from rag.app.deps import UserPrincipal
-from rag.app.usage_routes import get_usage
+from rag.app.usage_routes import get_usage, list_usage_events
 
 
 class FakeResult:
@@ -14,6 +15,9 @@ class FakeResult:
 
     def all(self):
         return self.rows
+
+    def scalars(self):
+        return self
 
 
 class FakeSession:
@@ -53,3 +57,27 @@ async def test_usage_unknown_model_and_default_period():
 
     assert summary.period
     assert summary.groups[0].dimension == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_list_usage_events():
+    principal = UserPrincipal(uuid4(), "a@b.com", uuid4(), "member")
+    record = SimpleNamespace(
+        event_id=uuid4(),
+        tenant_id=principal.tenant_id,
+        project_id=uuid4(),
+        api_key_id=None,
+        metric="request",
+        quantity=1,
+        model=None,
+        period="2026-10",
+        occurred_at=datetime.now(UTC),
+    )
+    results = await list_usage_events(
+        principal, FakeSession([[record]]), "2026-10", 20, 0
+    )
+
+    assert (results[0].event_id, results[0].quantity) == (
+        record.event_id,
+        1,
+    )

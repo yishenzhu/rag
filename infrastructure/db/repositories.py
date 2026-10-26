@@ -190,3 +190,22 @@ class UsageRepository:
             .order_by(dimension)
         )
         return result.all()
+
+    async def events(
+        self,
+        tenant_id: UUID,
+        period: str,
+        limit: int,
+        offset: int,
+    ) -> list[UsageLedger]:
+        result = await self.session.execute(
+            select(UsageLedger)
+            .where(
+                UsageLedger.tenant_id == tenant_id,
+                UsageLedger.period == period,
+            )
+            .order_by(UsageLedger.occurred_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().all())
