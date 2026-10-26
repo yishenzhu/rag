@@ -37,6 +37,9 @@ dependencies = [
     # Cache
     "redis>=5.0.0",
 
+    # Observability
+    "prometheus-client>=0.20.0",
+
     # Vector store
     "qdrant-client>=1.9.0",
 

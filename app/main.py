@@ -17,6 +17,10 @@ from ..core import Config, setup_logger
 from ..engine import RAGPipeline
 from ..infrastructure.cache.last_used import flush_forever
 from ..infrastructure.cache.usage_flush import flush_forever as usage_flush_forever
+from ..infrastructure.observability.metrics import (
+    MetricsMiddleware,
+    metrics_response,
+)
 from ..infrastructure.vector.memory_index import MemoryIndex
 from ..routes import router as legacy_router
 from .api_key_routes import router as api_key_router
@@ -71,6 +75,11 @@ def create_app() -> FastAPI:
     app = FastAPI(title="RAG Service", version="2.0.0", lifespan=lifespan)
     app.state.redis = redis
     app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(MetricsMiddleware)
+
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics():
+        return metrics_response()
     app.include_router(health_router)
     app.include_router(health_router, prefix="/v1")
     app.include_router(auth_router, prefix="/v1")

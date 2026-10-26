@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.engine import get_session_factory
 from ..db.models import UsageLedger
+from ..observability.metrics import USAGE_FLUSH_FAILURES
 from .usage_buffer import QUEUE_KEY
 
 BATCH_SIZE = 100
@@ -62,4 +63,5 @@ async def flush_forever(redis: Redis, interval: float = 60.0) -> None:
             try:
                 await UsageFlusher(redis, session).flush()
             except Exception:
+                USAGE_FLUSH_FAILURES.inc()
                 logger.exception("usage flush failed")

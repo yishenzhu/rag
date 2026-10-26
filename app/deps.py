@@ -18,6 +18,11 @@ from ..infrastructure.cache.rate_limit import RateLimiter
 from ..infrastructure.cache.usage_buffer import UsageBuffer
 from ..infrastructure.db.engine import get_session
 from ..infrastructure.db.repositories import ApiKeyRepository, UserRepository
+from ..infrastructure.observability.metrics import (
+    AUTH_FAILURES,
+    QUOTA_EXCEEDED,
+    RATE_LIMIT_REJECTED,
+)
 from ..infrastructure.vector.memory_index import MemoryIndex
 from ..security.api_keys import ApiKeyError, has_scope, parse_api_key, verify_api_key
 from ..security.auth import TokenError, decode_access_token
@@ -67,11 +72,13 @@ async def require_api_key(
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
     token = token.strip()
     if scheme.lower() != "bearer" or not token:
+        AUTH_FAILURES.labels("missing_token").inc()
         raise HTTPException(401, "missing bearer token", headers=AUTH_HEADERS)
 
     try:
         parsed = parse_api_key(token)
     except ApiKeyError:
+        AUTH_FAILURES.labels("malformed").inc()
         raise HTTPException(401, "malformed api key", headers=AUTH_HEADERS) from None
 
     cache = ApiKeyCache(redis) if redis is not None else None
@@ -84,6 +91,7 @@ async def require_api_key(
     if record is None or not verify_api_key(
         token, record.key_hash, settings.api_key_pepper
     ):
+        AUTH_FAILURES.labels("invalid").inc()
         raise HTTPException(401, "invalid api key", headers=AUTH_HEADERS)
 
     now = datetime.now(UTC)
@@ -92,6 +100,7 @@ async def require_api_key(
         or record.revoked_at is not None
         or (record.expires_at is not None and record.expires_at <= now)
     ):
+        AUTH_FAILURES.labels("inactive").inc()
         raise HTTPException(401, "api key inactive or expired", headers=AUTH_HEADERS)
 
     if redis is not None:
@@ -100,6 +109,7 @@ async def require_api_key(
         )
         allowed, _ = await limiter.allow(f"key:{record.id}")
         if not allowed:
+            RATE_LIMIT_REJECTED.inc()
             raise HTTPException(
                 429,
                 "rate limit exceeded",
@@ -108,6 +118,7 @@ async def require_api_key(
         quota = QuotaLimiter(redis, settings.monthly_request_quota)
         allowed, _ = await quota.consume(record.tenant_id)
         if not allowed:
+            QUOTA_EXCEEDED.inc()
             raise HTTPException(
                 429,
                 "monthly quota exceeded",

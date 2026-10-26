@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models import OutboxEvent
 from ..db.repositories import OutboxRepository
+from ..observability.metrics import OUTBOX_PUBLISH_FAILURES
 from .kafka import KafkaProducer
 
 
@@ -50,6 +51,7 @@ class OutboxRelay:
                 event.published_at = datetime.now(UTC)
                 event.last_error = None
             except Exception as exc:  # noqa: BLE001
+                OUTBOX_PUBLISH_FAILURES.inc()
                 event.attempts += 1
                 event.last_error = str(exc)[:1000]
                 if event.attempts >= self.max_attempts:
